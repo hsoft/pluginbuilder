@@ -207,6 +207,8 @@ class py2app(Command):
          "depend on an existing installation of Python " + installation_info()),
         ("alias", 'A',
          "Use an alias to current source file (for development only!)"),
+        ("use-modulefinder", None,
+         "Use Python's builtin ModuleFinder instead of modulegraph for dependencies checking."),
         ("argv-emulation", 'a',
          "Use argv emulation [disabled for plugins]"),
         ("argv-inject=", None,
@@ -260,6 +262,7 @@ class py2app(Command):
         self.iconfile = None
         self.extension = None
         self.alias = 0
+        self.use_modulefinder = False
         self.argv_emulation = 0
         self.argv_inject = None
         self.no_chdir = 0
@@ -556,13 +559,22 @@ class py2app(Command):
             debug = 4
         else:
             debug = 0
-        return find_modules(
-            scripts=self.collect_scripts(),
-            includes=self.includes,
-            packages=self.packages,
-            excludes=self.excludes,
-            debug=debug,
-        )
+        if self.use_modulefinder:
+            from hybrid_modulefinder import HybridModuleFinder
+            mf = HybridModuleFinder(debug=debug, excludes=self.excludes)
+            for include in self.includes:
+                mf.include_module(include)
+            for script in self.collect_scripts():
+                mf.run_script(script)
+            return mf
+        else:
+            return find_modules(
+                scripts=self.collect_scripts(),
+                includes=self.includes,
+                packages=self.packages,
+                excludes=self.excludes,
+                debug=debug,
+            )
 
     def collect_filters(self):
         return [has_filename_filter] + list(self.filters)
@@ -641,18 +653,6 @@ class py2app(Command):
             mf.graphreport(open(dgraph, 'w'), flatpackages=flatpackages)
 
     def finalize_modulefinder(self, mf):
-        for item in mf.flatten():
-            if isinstance(item, Package) and item.filename == '-':
-                fn = os.path.join(self.temp_dir, 'empty_package', '__init__.py')
-                if not os.path.exists(fn):
-                    dn = os.path.dirname(fn)
-                    if not os.path.exists(dn):
-                        os.makedirs(dn)
-                    fp = open(fn, 'w')
-                    fp.close()
-
-                item.filename = fn
-
         py_files, extensions = parse_mf_results(mf)
         py_files = list(py_files)
         extensions = list(extensions)
