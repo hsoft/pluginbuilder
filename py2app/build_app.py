@@ -1283,7 +1283,7 @@ class py2app(Command):
                 import sysconfig
                 pyconfig_path = sysconfig.get_config_h_filename()
             except ImportError:
-                os.path.join(real_include, 'python%s/pyconfig.h' % (sys.version[:3]))
+                pyconfig_path = os.path.join(real_include, 'python%s/pyconfig.h' % (sys.version[:3]))
             self.copy_file(pyconfig_path, os.path.join(inc_dir, 'pyconfig.h'))
 
 
