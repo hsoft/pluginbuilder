@@ -45,11 +45,15 @@ from py2app import recipes
 from distutils.sysconfig import get_config_var
 PYTHONFRAMEWORK=get_config_var('PYTHONFRAMEWORK')
 
-
-def get_zipfile(dist):
-    if sys.version_info[0] == 3:
-        return "python%d%d.zip"%(sys.version_info[:2])
-    return getattr(dist, "zipfile", None) or "site-packages.zip"
+if sys.version_info[0] >= 3:
+    try:
+        import sysconfig
+        has_sysconfig = True
+    except ImportError:
+        has_sysconfig = False
+else:
+    # Python 2.7 has sysconfig, but we still must use the "old fashion" packaging style with it.
+    has_sysconfig = False
 
 def framework_copy_condition(src):
     # Skip Headers, .svn, and CVS dirs
@@ -712,11 +716,7 @@ class py2app(Command):
         self.dist_dir = os.path.abspath(self.dist_dir)
         self.mkpath(self.dist_dir)
 
-        self.lib_dir = os.path.join(self.bdist_dir,
-            os.path.dirname(get_zipfile(self.distribution)))
-        self.mkpath(self.lib_dir)
-
-        self.ext_dir = os.path.join(self.lib_dir, 'lib-dynload')
+        self.ext_dir = os.path.join(self.bdist_dir, 'lib-dynload')
         self.mkpath(self.ext_dir)
 
         self.framework_dir = os.path.join(self.bdist_dir, 'Frameworks')
@@ -765,10 +765,6 @@ class py2app(Command):
         self.lib_files = []
         self.app_files = []
 
-        # create the shared zipfile containing all Python modules
-        archive_name = os.path.join(self.lib_dir,
-                                    os.path.basename(get_zipfile(dist)))
-
         for path, files in loader_files:
             dest = os.path.join(self.collect_dir, path)
             self.mkpath(dest)
@@ -779,17 +775,9 @@ class py2app(Command):
                 else:
                     self.copy_file(fn, destfn)
 
-        arcname = self.make_lib_archive(archive_name,
-            base_dir=self.collect_dir, verbose=self.verbose,
-            dry_run=self.dry_run)
-
-        # XXX: this doesn't work with python3
-        #self.lib_files.append(arcname)
-
         # build the executables
         for target in self.targets:
-            dst = self.build_executable(
-                target, arcname, pkgexts, copyexts, target.script)
+            dst = self.build_executable(target, pkgexts, copyexts, target.script)
             exp = os.path.join(dst, 'Contents', 'MacOS')
             execdst = os.path.join(exp, 'python')
             if self.semi_standalone:
@@ -961,18 +949,17 @@ class py2app(Command):
         indir = os.path.dirname(os.path.join(info['location'], info['name']))
         outdir = os.path.dirname(os.path.join(dst, info['name']))
         self.mkpath(os.path.join(outdir, 'Resources'))
-        try:
+        if has_sysconfig:
             # Since python 3.2, the naming scheme for config files location has considerably
             # complexified. The old, simple way doesn't work anymore. Fortunately, a new module was
             # added to get such paths easily.
-            import sysconfig
             pyconfig_path = sysconfig.get_config_h_filename()
             makefile_path = sysconfig.get_makefile_filename()
             assert pyconfig_path.startswith(indir)
             assert makefile_path.startswith(indir)
             pyconfig_path = pyconfig_path[len(indir)+1:]
             makefile_path = makefile_path[len(indir)+1:]
-        except ImportError:
+        else:
             pydir = 'python%s'%(info['version'])
             pyconfig_path = 'include/%s/pyconfig.h' % (pydir, )
             makefile_path = 'lib/%s/config/Makefile' % (pydir, )
@@ -1050,7 +1037,7 @@ class py2app(Command):
         else:
             # Do we allow to specify no targets?
             # We can at least build a zipfile...
-            self.app_dir = self.lib_dir
+            self.app_dir = self.bdist_dir
 
     def initialize_prescripts(self):
         prescripts = []
@@ -1231,7 +1218,7 @@ class py2app(Command):
         target.appdir = appdir
         return appdir
 
-    def build_executable(self, target, arcname, pkgexts, copyexts, script):
+    def build_executable(self, target, pkgexts, copyexts, script):
         # Build an executable for the target
         appdir, resdir, plist = self.create_bundle(target, script)
         self.appdir = appdir
@@ -1260,11 +1247,15 @@ class py2app(Command):
             arcdir = os.path.join(resdir, 'lib', 'python' + sys.version[:3])
         else:
             arcdir = os.path.join(resdir, 'lib')
-        realhome = os.path.join(sys.prefix, 'lib', 'python' + sys.version[:3])
         self.mkpath(pydir)
         self.symlink('../../site.py', os.path.join(pydir, 'site.py'))
-        cfgdir = os.path.join(pydir, 'config')
-        realcfg = os.path.join(realhome, 'config')
+        if has_sysconfig:
+            realcfg = os.path.dirname(sysconfig.get_makefile_filename())
+            cfgdir = os.path.join(resdir, os.path.relpath(realcfg, sys.prefix))
+        else:
+            realhome = os.path.join(sys.prefix, 'lib', 'python' + sys.version[:3])
+            cfgdir = os.path.join(pydir, 'config')
+            realcfg = os.path.join(realhome, 'config')
         real_include = os.path.join(sys.prefix, 'include')
         if self.semi_standalone:
             self.symlink(realcfg, cfgdir)
@@ -1276,21 +1267,18 @@ class py2app(Command):
                 if os.path.exists(rfn):
                     self.copy_file(rfn, os.path.join(cfgdir, fn))
 
-            inc_dir = os.path.join(resdir, 'include', 'python' + sys.version[:3])
-            self.mkpath(inc_dir)
-            try:
+            if has_sysconfig:
                 # see copy_python_framework() for explanation.
-                import sysconfig
                 pyconfig_path = sysconfig.get_config_h_filename()
-            except ImportError:
+            else:
                 pyconfig_path = os.path.join(real_include, 'python%s/pyconfig.h' % (sys.version[:3]))
+            pyconfig_path_relative = os.path.relpath(os.path.dirname(pyconfig_path), sys.prefix)
+            inc_dir = os.path.join(resdir, pyconfig_path_relative)
+            self.mkpath(inc_dir)
             self.copy_file(pyconfig_path, os.path.join(inc_dir, 'pyconfig.h'))
 
 
-        self.copy_file(arcname, arcdir)
-        if sys.version_info[0] != 2:
-            import zlib
-            self.copy_file(zlib.__file__, os.path.dirname(arcdir))
+        self.copy_tree(self.collect_dir, pydir)
         
         ext_dir = os.path.join(pydir, os.path.basename(self.ext_dir))
         self.copy_tree(self.ext_dir, ext_dir, preserve_symlinks=True)
@@ -1335,34 +1323,6 @@ class py2app(Command):
             else:
                 return
         return SourceModule(item.identifier, pathname)
-
-    def make_lib_archive(self, zip_filename, base_dir, verbose=0,
-                         dry_run=0):
-        # Like distutils "make_archive", except we can specify the
-        # compression to use - default is ZIP_STORED to keep the
-        # runtime performance up.
-        # Also, we don't append '.zip' to the filename.
-        from distutils.dir_util import mkpath
-        mkpath(os.path.dirname(zip_filename), dry_run=dry_run)
-
-        if self.compressed:
-            compression = zipfile.ZIP_DEFLATED
-        else:
-            compression = zipfile.ZIP_STORED
-        if not dry_run:
-            z = zipfile.ZipFile(zip_filename, "w",
-                                compression=compression)
-            save_cwd = os.getcwd()
-            os.chdir(base_dir)
-            for dirpath, dirnames, filenames in os.walk('.'):
-                for fn in filenames:
-                    path = os.path.normpath(os.path.join(dirpath, fn))
-                    if os.path.isfile(path):
-                        z.write(path, path)
-            os.chdir(save_cwd)
-            z.close()
-
-        return zip_filename
 
     def copy_tree(self, infile, outfile,
                    preserve_mode=1, preserve_times=1, preserve_symlinks=0,
