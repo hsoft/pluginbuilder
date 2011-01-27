@@ -11,6 +11,8 @@ from itertools import chain
 
 from setuptools import Command
 from distutils.util import convert_path
+from distutils.dir_util import mkpath
+from distutils.file_util import copy_file
 from distutils import log
 from distutils.errors import DistutilsOptionError
 from pkg_resources import require
@@ -25,7 +27,7 @@ from macholib.util import has_filename_filter
 
 from py2plugin.create_pluginbundle import create_pluginbundle
 from py2plugin.util import (fancy_split, byte_compile, make_loader, copy_tree,
-    strip_files, in_system_path, makedirs, iter_platform_files, skipscm, copy_file,
+    strip_files, in_system_path, makedirs, iter_platform_files, skipscm, copy_file_data,
     os_path_isdir, copy_resource, SCMDIRS)
 from py2plugin.filters import not_stdlib_filter
 from py2plugin import recipes
@@ -34,16 +36,12 @@ from distutils.sysconfig import get_config_var
 PYTHONFRAMEWORK=get_config_var('PYTHONFRAMEWORK')
 
 class PythonStandalone(macholib.MachOStandalone.MachOStandalone):
-    def __init__(self, appbuilder, *args, **kwargs):
-        super(PythonStandalone, self).__init__(*args, **kwargs)
-        self.appbuilder = appbuilder
-
     def copy_dylib(self, src):
         dest = os.path.join(self.dest, os.path.basename(src))
-        return self.appbuilder.copy_dylib(src, dest)
+        return copy_dylib(src, dest)
 
     def copy_framework(self, info):
-        destfn = self.appbuilder.copy_framework(info, self.dest)
+        destfn = copy_framework(info, self.dest)
         dest = os.path.join(self.dest, info['shortname'] + '.framework')
         self.pending.append((destfn, iter_platform_files(dest)))
         return destfn
@@ -83,6 +81,204 @@ def installation_info(executable=None, version=None):
     else:
         return version[:3]
 
+def force_symlink(src, dst):
+    try:
+        os.remove(dst)
+    except OSError:
+        pass
+    os.symlink(src, dst)
+
+def create_loader(item, temp_dir, verbose, dry_run):
+    # Hm, how to avoid needless recreation of this file?
+    slashname = item.identifier.replace('.', os.sep)
+    pathname = os.path.join(temp_dir, "%s.py" % slashname)
+    if os.path.exists(pathname):
+        if verbose:
+            print(("skipping python loader for extension %r"
+                % (item.identifier,)))
+    else:
+        mkpath(os.path.dirname(pathname))
+        # and what about dry_run?
+        if verbose:
+            print(("creating python loader for extension %r"
+                % (item.identifier,)))
+
+        fname = slashname + os.path.splitext(item.filename)[1]
+        source = make_loader(fname)
+        if not dry_run:
+            open(pathname, "w").write(source)
+        else:
+            return
+    return SourceModule(item.identifier, pathname)
+
+def copy_python_framework(info, dst):
+    # XXX - In this particular case we know exactly what we can
+    #       get away with.. should this be extended to the general
+    #       case?  Per-framework recipes?
+    indir = os.path.dirname(os.path.join(info['location'], info['name']))
+    outdir = os.path.dirname(os.path.join(dst, info['name']))
+    mkpath(os.path.join(outdir, 'Resources'))
+    # Since python 3.2, the naming scheme for config files location has considerably
+    # complexified. The old, simple way doesn't work anymore. Fortunately, a new module was
+    # added to get such paths easily.
+    pyconfig_path = sysconfig.get_config_h_filename()
+    makefile_path = sysconfig.get_makefile_filename()
+    assert pyconfig_path.startswith(indir)
+    assert makefile_path.startswith(indir)
+    pyconfig_path = pyconfig_path[len(indir)+1:]
+    makefile_path = makefile_path[len(indir)+1:]
+
+    # distutils looks for some files relative to sys.executable, which
+    # means they have to be in the framework...
+    mkpath(os.path.join(outdir, os.path.dirname(pyconfig_path)))
+    mkpath(os.path.join(outdir, os.path.dirname(makefile_path)))
+    fmwkfiles = [
+        os.path.basename(info['name']),
+        'Resources/Info.plist',
+        pyconfig_path,
+        makefile_path,
+    ]
+    for fn in fmwkfiles:
+        copy_file(os.path.join(indir, fn), os.path.join(outdir, fn))
+
+def copy_versioned_framework(info, dst):
+    # XXX - Boy is this ugly, but it makes sense because the developer
+    #       could have both Python 2.3 and 2.4, or Tk 8.4 and 8.5, etc.
+    #       Saves a good deal of space, and I'm pretty sure this ugly
+    #       hack is correct in the general case.
+    def framework_copy_condition(src):
+        # Skip Headers, .svn, and CVS dirs
+        return skipscm(src) and os.path.basename(src) != 'Headers'
+    
+    short = info['shortname'] + '.framework'
+    infile = os.path.join(info['location'], short)
+    outfile = os.path.join(dst, short)
+    version = info['version']
+    if version is None:
+        condition = framework_copy_condition
+    else:
+        vsplit = os.path.join(infile, 'Versions').split(os.sep)
+        def condition(src, vsplit=vsplit, version=version):
+            srcsplit = src.split(os.sep)
+            if (
+                    len(srcsplit) > len(vsplit) and
+                    srcsplit[:len(vsplit)] == vsplit and
+                    srcsplit[len(vsplit)] != version and
+                    not os.path.islink(src)
+                ):
+                return False
+            # Skip Headers, .svn, and CVS dirs
+            return framework_copy_condition(src)
+    
+    return copy_tree(infile, outfile, preserve_symlinks=True, condition=condition)
+
+def copy_framework(info, dst):
+    if info['shortname'] == PYTHONFRAMEWORK:
+        copy_python_framework(info, dst)
+    else:
+        copy_versioned_framework(info, dst)
+    return os.path.join(dst, info['name'])
+
+def copy_dylib(src, dst):
+    # will be copied from the framework?
+    if src != sys.executable:
+        copy_file(src, dst)
+    return dst
+
+def copy_package_data(package, target_dir):
+    """
+    Copy any package data in a python package into the target_dir.
+
+    This is a bit of a hack, it would be better to identify python eggs
+    and copy those in whole.
+    """
+    exts = [ i[0] for i in imp.get_suffixes() ]
+    exts.append('.py')
+    exts.append('.pyc')
+    exts.append('.pyo')
+    def datafilter(item):
+        for e in exts:
+            if item.endswith(e):
+                return False
+        return True
+
+    target_dir = os.path.join(target_dir, *(package.identifier.split('.')))
+    for dname in package.packagepath:
+        filenames = list(filter(datafilter, os_listdir(dname)))
+        for fname in filenames:
+            if fname in SCMDIRS:
+                # Scrub revision manager junk
+                continue
+            if fname in ('__pycache__',):
+                # Ignore PEP 3147 bytecode cache
+                continue
+            pth = os.path.join(dname, fname)
+
+            # Check if we have found a package, exclude those
+            if os_path_isdir(pth):
+                for p in os_listdir(pth):
+                    if p.startswith('__init__.') and p[8:] in exts:
+                        break
+
+                else:
+                    copy_tree(pth, os.path.join(target_dir, fname))
+                continue
+            else:
+                copy_file(pth, os.path.join(target_dir, fname))
+
+def strip_dsym(platfiles, appdir):
+    """ Remove .dSYM directories in the bundled application """
+
+    #
+    # .dSYM directories are contain detached debugging information and
+    # should be completely removed when the "strip" option is specified.
+    #
+    for dirpath, dnames, fnames in os.walk(appdir):
+        for nm in list(dnames):
+            if nm.endswith('.dSYM'):
+                print("removing debug info: %s/%s"%(dirpath, nm))
+                shutil.rmtree(os.path.join(dirpath, nm))
+                dnames.remove(nm)
+    return [file for file in platfiles if '.dSYM' not in file]
+
+def strip_files_and_report(files, verbose):
+    unstripped = 0
+    stripfiles = []
+    for fn in files:
+        unstripped += os.stat(fn).st_size
+        stripfiles.append(fn)
+        log.info('stripping %s', os.path.basename(fn))
+    strip_files(stripfiles, verbose=verbose)
+    stripped = 0
+    for fn in stripfiles:
+        stripped += os.stat(fn).st_size
+    log.info('stripping saved %d bytes (%d / %d)',
+        unstripped - stripped, stripped, unstripped)
+
+def get_bootstrap(bootstrap):
+    if isinstance(bootstrap, str):
+        if not os.path.exists(bootstrap):
+            bootstrap = imp_find_module(bootstrap)[1]
+    return bootstrap
+
+def get_bootstrap_data(bootstrap):
+    bootstrap = get_bootstrap(bootstrap)
+    if not isinstance(bootstrap, str):
+        return bootstrap.getvalue()
+    else:
+        return open(bootstrap, 'rU').read()
+
+def create_bundle(target, script, dist_dir, plist, runtime_preferences=None):
+    base = target.get_dest_base()
+    appdir = os.path.join(dist_dir, os.path.dirname(base))
+    appname = plist['CFBundleName']
+    print("*** creating plugin bundle: %s ***" % (appname,))
+    if runtime_preferences:
+        plist.setdefault('PyRuntimeLocations', runtime_preferences)
+    appdir, plist = create_pluginbundle(appdir, appname, plist=plist)
+    resdir = os.path.join(appdir, 'Contents', 'Resources')
+    return appdir, resdir, plist
+
 class py2plugin(Command):
     description = "create a Mac OS X application or plugin from Python scripts"
     # List of option tuples: long name, short name (None if no short
@@ -110,10 +306,6 @@ class py2plugin(Command):
          "comma-separated list of additional frameworks and dylibs to include"),
         ("plist=", 'P',
          "Info.plist template file, dict, or plistlib.Plist"),
-        ("graph", 'g',
-         "output module dependency graph"),
-        ("xref", 'x',
-         "output module cross-reference as html"),
         ("no-strip", None,
          "do not strip debug and local symbols from output"),
         ("semi-standalone", 's',
@@ -139,7 +331,6 @@ class py2plugin(Command):
         ]
 
     boolean_options = [
-        "xref",
         "strip",
         "no-strip",
         "site-packages",
@@ -148,15 +339,12 @@ class py2plugin(Command):
         "use-pythonpath",
         "debug-modulegraph",
         "debug-skip-macholib",
-        "graph",
     ]
 
-    def initialize_options (self):
+    def initialize_options(self):
         self.app = None
         self.plugin = None
         self.bdist_base = None
-        self.xref = False
-        self.graph = False
         self.optimize = 0
         self.strip = True
         self.no_strip = False
@@ -290,14 +478,7 @@ class py2plugin(Command):
             dylib = 'libpython%s.dylib' % (sys.version[:3],)
             runtime = os.path.join(prefix, 'lib', dylib)
         return dylib, runtime
-
-    def symlink(self, src, dst):
-        try:
-            os.remove(dst)
-        except OSError:
-            pass
-        os.symlink(src, dst)
-
+    
     def get_runtime_preferences(self, prefix=None, version=None):
         dylib, runtime = self.get_runtime(prefix=prefix, version=version)
         yield os.path.join('@executable_path', '..', 'Frameworks', dylib)
@@ -395,27 +576,11 @@ class py2plugin(Command):
             dst = self.build_alias_executable(target, target.script)
             self.app_files.append(dst)
 
-    def collect_recipedict(self):
-        return dict(iterRecipes())
-
-    def get_modulefinder(self):
-        if self.debug_modulegraph:
-            debug = 4
-        else:
-            debug = 0
-        return find_modules(
-            scripts=self.collect_scripts(),
-            includes=self.includes,
-            packages=self.packages,
-            excludes=self.excludes,
-            debug=debug,
-        )
-
     def collect_filters(self):
         return [has_filename_filter] + list(self.filters)
 
     def process_recipes(self, mf, filters, flatpackages, loader_files):
-        rdict = self.collect_recipedict()
+        rdict = dict(iterRecipes())
         while True:
             for name, check in rdict.items():
                 rval = check(self, mf)
@@ -431,8 +596,7 @@ class py2plugin(Command):
                     flatpackages[pkg[0]] = pkg[1]
                 filters.extend(rval.get('filters', ()))
                 loader_files.extend(rval.get('loader_files', ()))
-                newbootstraps = list(map(self.get_bootstrap,
-                    rval.get('prescripts', ())))
+                newbootstraps = list(map(get_bootstrap, rval.get('prescripts', ())))
 
                 for fn in newbootstraps:
                     if isinstance(fn, str):
@@ -465,29 +629,6 @@ class py2plugin(Command):
         print('%d orphaned' % (nodes_orphaned,))
         print('%d remaining' % (nodes_seen - nodes_removed,))
 
-    def get_appname(self):
-        return self.plist['CFBundleName']
-
-    def build_xref(self, mf, flatpackages):
-        for target in self.targets:
-            base = target.get_dest_base()
-            appdir = os.path.join(self.dist_dir, os.path.dirname(base))
-            appname = self.get_appname()
-            dgraph = os.path.join(appdir, appname + '.html')
-            print(("*** creating dependency html: %s ***"
-                % (os.path.basename(dgraph),)))
-            mf.create_xref(open(dgraph, 'w'))
-
-    def build_graph(self, mf, flatpackages):
-        for target in self.targets:
-            base = target.get_dest_base()
-            appdir = os.path.join(self.dist_dir, os.path.dirname(base))
-            appname = self.get_appname()
-            dgraph = os.path.join(appdir, appname + '.dot')
-            print(("*** creating dependency graph: %s ***"
-                % (os.path.basename(dgraph),)))
-            mf.graphreport(open(dgraph, 'w'), flatpackages=flatpackages)
-
     def finalize_modulefinder(self, mf):
         for item in mf.flatten():
             if isinstance(item, Package) and item.filename == '-':
@@ -508,12 +649,14 @@ class py2plugin(Command):
 
     def collect_packagedirs(self):
         return list(filter(os.path.exists, [
-            os.path.join(os.path.realpath(self.get_bootstrap(pkg)), '')
+            os.path.join(os.path.realpath(get_bootstrap(pkg)), '')
             for pkg in self.packages
         ]))
 
     def run_normal(self):
-        mf = self.get_modulefinder()
+        debug = 4 if self.debug_modulegraph else 0
+        mf = find_modules(scripts=self.collect_scripts(), includes=self.includes,
+            packages=self.packages, excludes=self.excludes, debug=debug)
         filters = self.collect_filters()
         flatpackages = {}
         loader_files = []
@@ -524,11 +667,6 @@ class py2plugin(Command):
             pdb.Pdb().set_trace()
 
         self.filter_dependencies(mf, filters)
-
-        if self.graph:
-            self.build_graph(mf, flatpackages)
-        if self.xref:
-            self.build_xref(mf, flatpackages)
 
         py_files, extensions = self.finalize_modulefinder(mf)
         pkgdirs = self.collect_packagedirs()
@@ -581,7 +719,7 @@ class py2plugin(Command):
                 pkgexts.append(ext)
             else:
                 if '.' in ext.identifier:
-                    py_files.append(self.create_loader(ext))
+                    py_files.append(create_loader(ext, self.temp_dir, self.verbose, self.dry_run))
                 copyexts.append(ext)
             extmap[fn] = ext
 
@@ -596,7 +734,7 @@ class py2plugin(Command):
 
         for item in py_files:
             if not isinstance(item, Package): continue
-            self.copy_package_data(item, self.collect_dir)
+            copy_package_data(item, self.collect_dir)
 
         self.lib_files = []
         self.app_files = []
@@ -617,7 +755,7 @@ class py2plugin(Command):
             exp = os.path.join(dst, 'Contents', 'MacOS')
             execdst = os.path.join(exp, 'python')
             if self.semi_standalone:
-                self.symlink(sys.executable, execdst)
+                force_symlink(sys.executable, execdst)
             else:
                 if os.path.exists(os.path.join(sys.prefix, ".Python")):
                     fn = os.path.join(sys.prefix, "lib", "python%d.%d"%(sys.version_info[:2]), "orig-prefix.txt")
@@ -634,7 +772,7 @@ class py2plugin(Command):
                 else:
                     self.copy_file(sys.executable, execdst)
             if not self.debug_skip_macholib:
-                mm = PythonStandalone(self, dst, executable_path=exp)
+                mm = PythonStandalone(dst, executable_path=exp)
                 dylib, runtime = self.get_runtime()
                 if self.semi_standalone:
                     mm.excludes.append(runtime)
@@ -649,162 +787,11 @@ class py2plugin(Command):
                 for fmwk in self.frameworks:
                     mm.mm.run_file(fmwk)
                 platfiles = mm.run()
-                if self.strip:
-                    platfiles = self.strip_dsym(platfiles)
-                    self.strip_files(platfiles)
+                if self.strip and not self.dry_run:
+                    platfiles = strip_dsym(platfiles, self.appdir)
+                    strip_files_and_report(platfiles, self.verbose)
             self.app_files.append(dst)
-
-    def copy_package_data(self, package, target_dir):
-        """
-        Copy any package data in a python package into the target_dir.
-
-        This is a bit of a hack, it would be better to identify python eggs
-        and copy those in whole.
-        """
-        exts = [ i[0] for i in imp.get_suffixes() ]
-        exts.append('.py')
-        exts.append('.pyc')
-        exts.append('.pyo')
-        def datafilter(item):
-            for e in exts:
-                if item.endswith(e):
-                    return False
-            return True
-
-        target_dir = os.path.join(target_dir, *(package.identifier.split('.')))
-        for dname in package.packagepath:
-            filenames = list(filter(datafilter, os_listdir(dname)))
-            for fname in filenames:
-                if fname in SCMDIRS:
-                    # Scrub revision manager junk
-                    continue
-                if fname in ('__pycache__',):
-                    # Ignore PEP 3147 bytecode cache
-                    continue
-                pth = os.path.join(dname, fname)
-
-                # Check if we have found a package, exclude those
-                if os_path_isdir(pth):
-                    for p in os_listdir(pth):
-                        if p.startswith('__init__.') and p[8:] in exts:
-                            break
-
-                    else:
-                        copy_tree(pth, os.path.join(target_dir, fname))
-                    continue
-                else:
-                    copy_file(pth, os.path.join(target_dir, fname))
-
-
-    def strip_dsym(self, platfiles):
-        """ Remove .dSYM directories in the bundled application """
-
-        #
-        # .dSYM directories are contain detached debugging information and
-        # should be completely removed when the "strip" option is specified.
-        #
-        if self.dry_run:
-            return platfiles
-        for dirpath, dnames, fnames in os.walk(self.appdir):
-            for nm in list(dnames):
-                if nm.endswith('.dSYM'):
-                    print("removing debug info: %s/%s"%(dirpath, nm))
-                    shutil.rmtree(os.path.join(dirpath, nm))
-                    dnames.remove(nm)
-        return [file for file in platfiles if '.dSYM' not in file]
-
-    def strip_files(self, files):
-        unstripped = 0
-        stripfiles = []
-        for fn in files:
-            unstripped += os.stat(fn).st_size
-            stripfiles.append(fn)
-            log.info('stripping %s', os.path.basename(fn))
-        strip_files(stripfiles, dry_run=self.dry_run, verbose=self.verbose)
-        stripped = 0
-        for fn in stripfiles:
-            stripped += os.stat(fn).st_size
-        log.info('stripping saved %d bytes (%d / %d)',
-            unstripped - stripped, stripped, unstripped)
-
-    def copy_dylib(self, src, dst):
-        # will be copied from the framework?
-        if src != sys.executable:
-            self.copy_file(src, dst)
-        return dst
-
-    def copy_versioned_framework(self, info, dst):
-        # XXX - Boy is this ugly, but it makes sense because the developer
-        #       could have both Python 2.3 and 2.4, or Tk 8.4 and 8.5, etc.
-        #       Saves a good deal of space, and I'm pretty sure this ugly
-        #       hack is correct in the general case.
-        def framework_copy_condition(src):
-            # Skip Headers, .svn, and CVS dirs
-            return skipscm(src) and os.path.basename(src) != 'Headers'
-        
-        short = info['shortname'] + '.framework'
-        infile = os.path.join(info['location'], short)
-        outfile = os.path.join(dst, short)
-        version = info['version']
-        if version is None:
-            condition = framework_copy_condition
-        else:
-            vsplit = os.path.join(infile, 'Versions').split(os.sep)
-            def condition(src, vsplit=vsplit, version=version):
-                srcsplit = src.split(os.sep)
-                if (
-                        len(srcsplit) > len(vsplit) and
-                        srcsplit[:len(vsplit)] == vsplit and
-                        srcsplit[len(vsplit)] != version and
-                        not os.path.islink(src)
-                    ):
-                    return False
-                # Skip Headers, .svn, and CVS dirs
-                return framework_copy_condition(src)
-        
-        return copy_tree(infile, outfile, preserve_symlinks=True, condition=condition)
     
-    def copy_framework(self, info, dst):
-        if info['shortname'] == PYTHONFRAMEWORK:
-            self.copy_python_framework(info, dst)
-        else:
-            self.copy_versioned_framework(info, dst)
-        return os.path.join(dst, info['name'])
-
-    def copy_python_framework(self, info, dst):
-        # XXX - In this particular case we know exactly what we can
-        #       get away with.. should this be extended to the general
-        #       case?  Per-framework recipes?
-        indir = os.path.dirname(os.path.join(info['location'], info['name']))
-        outdir = os.path.dirname(os.path.join(dst, info['name']))
-        self.mkpath(os.path.join(outdir, 'Resources'))
-        # Since python 3.2, the naming scheme for config files location has considerably
-        # complexified. The old, simple way doesn't work anymore. Fortunately, a new module was
-        # added to get such paths easily.
-        pyconfig_path = sysconfig.get_config_h_filename()
-        makefile_path = sysconfig.get_makefile_filename()
-        assert pyconfig_path.startswith(indir)
-        assert makefile_path.startswith(indir)
-        pyconfig_path = pyconfig_path[len(indir)+1:]
-        makefile_path = makefile_path[len(indir)+1:]
-
-        # distutils looks for some files relative to sys.executable, which
-        # means they have to be in the framework...
-        self.mkpath(os.path.join(outdir, os.path.dirname(pyconfig_path)))
-        self.mkpath(os.path.join(outdir, os.path.dirname(makefile_path)))
-        fmwkfiles = [
-            os.path.basename(info['name']),
-            'Resources/Info.plist',
-            pyconfig_path,
-            makefile_path,
-        ]
-        for fn in fmwkfiles:
-            self.copy_file(
-                os.path.join(indir, fn),
-                os.path.join(outdir, fn))
-
-
-
     def fixup_distribution(self):
         dist = self.distribution
 
@@ -865,44 +852,13 @@ class py2plugin(Command):
         newprescripts = []
         for s in prescripts:
             if isinstance(s, str):
-                newprescripts.append(
-                    self.get_bootstrap('py2plugin.bootstrap.' + s))
+                newprescripts.append(get_bootstrap('py2plugin.bootstrap.' + s))
             else:
                 newprescripts.append(s)
 
         for target in self.targets:
             prescripts = getattr(target, 'prescripts', [])
             target.prescripts = newprescripts + prescripts
-
-
-    def get_bootstrap(self, bootstrap):
-        if isinstance(bootstrap, str):
-            if not os.path.exists(bootstrap):
-                bootstrap = imp_find_module(bootstrap)[1]
-        return bootstrap
-
-    def get_bootstrap_data(self, bootstrap):
-        bootstrap = self.get_bootstrap(bootstrap)
-        if not isinstance(bootstrap, str):
-            return bootstrap.getvalue()
-        else:
-            return open(bootstrap, 'rU').read()
-
-    def create_bundle(self, target, script, use_runtime_preference=True):
-        base = target.get_dest_base()
-        appdir = os.path.join(self.dist_dir, os.path.dirname(base))
-        appname = self.get_appname()
-        print("*** creating plugin bundle: %s ***" % (appname,))
-        if self.runtime_preferences and use_runtime_preference:
-            self.plist.setdefault(
-                'PyRuntimeLocations', self.runtime_preferences)
-        appdir, plist = create_pluginbundle(
-            appdir,
-            appname,
-            plist=self.plist,
-        )
-        resdir = os.path.join(appdir, 'Contents', 'Resources')
-        return appdir, resdir, plist
     
     def iter_frameworks(self):
         for fn in self.frameworks:
@@ -915,7 +871,7 @@ class py2plugin(Command):
     
     def build_alias_executable(self, target, script):
         # Build an alias executable for the target
-        appdir, resdir, plist = self.create_bundle(target, script)
+        appdir, resdir, plist = create_bundle(target, script, self.dist_dir, self.plist, self.runtime_preferences)
 
         # symlink python executable
         execdst = os.path.join(appdir, 'Contents', 'MacOS', 'python')
@@ -924,14 +880,14 @@ class py2plugin(Command):
             pyExecutable = prefixPathExecutable
         else:
             pyExecutable = sys.executable
-        self.symlink(pyExecutable, execdst)
+        force_symlink(pyExecutable, execdst)
 
         # make PYTHONHOME
         pyhome = os.path.join(resdir, 'lib', 'python' + sys.version[:3])
         realhome = os.path.join(sys.prefix, 'lib', 'python' + sys.version[:3])
         makedirs(pyhome)
-        self.symlink('../../site.py', os.path.join(pyhome, 'site.py'))
-        self.symlink(
+        force_symlink('../../site.py', os.path.join(pyhome, 'site.py'))
+        force_symlink(
             os.path.join(realhome, 'config'),
             os.path.join(pyhome, 'config'))
             
@@ -943,7 +899,7 @@ class py2plugin(Command):
             if src == dest:
                 continue
             makedirs(os.path.dirname(dest))
-            self.symlink(os.path.abspath(src), dest)
+            force_symlink(os.path.abspath(src), dest)
 
         # symlink frameworks
         for src in self.iter_frameworks():
@@ -952,12 +908,12 @@ class py2plugin(Command):
             if src == dest:
                 continue
             makedirs(os.path.dirname(dest))
-            self.symlink(os.path.abspath(src), dest)
+            force_symlink(os.path.abspath(src), dest)
 
         bootfn = '__boot__'
         bootfile = open(os.path.join(resdir, bootfn + '.py'), 'w')
         for fn in target.prescripts:
-            bootfile.write(self.get_bootstrap_data(fn))
+            bootfile.write(get_bootstrap_data(fn))
             bootfile.write('\n\n')
         bootfile.write('try:\n')
         bootfile.write('    _run(%r)\n' % os.path.realpath(script))
@@ -970,7 +926,7 @@ class py2plugin(Command):
 
     def build_executable(self, target, pkgexts, copyexts, script):
         # Build an executable for the target
-        appdir, resdir, plist = self.create_bundle(target, script)
+        appdir, resdir, plist = create_bundle(target, script, self.dist_dir, self.plist, self.runtime_preferences)
         self.appdir = appdir
         self.resdir = resdir
         self.plist = plist
@@ -983,7 +939,7 @@ class py2plugin(Command):
         bootfn = '__boot__'
         bootfile = open(os.path.join(resdir, bootfn + '.py'), 'w')
         for fn in target.prescripts:
-            bootfile.write(self.get_bootstrap_data(fn))
+            bootfile.write(get_bootstrap_data(fn))
             bootfile.write('\n\n')
         bootfile.write('_run(%r)\n' % (os.path.basename(script),))
         bootfile.close()
@@ -991,13 +947,13 @@ class py2plugin(Command):
         self.copy_file(script, resdir)
         pydir = os.path.join(resdir, 'lib', 'python' + sys.version[:3])
         self.mkpath(pydir)
-        self.symlink('../../site.py', os.path.join(pydir, 'site.py'))
+        force_symlink('../../site.py', os.path.join(pydir, 'site.py'))
         realcfg = os.path.dirname(sysconfig.get_makefile_filename())
         cfgdir = os.path.join(resdir, os.path.relpath(realcfg, sys.prefix))
         real_include = os.path.join(sys.prefix, 'include')
         if self.semi_standalone:
-            self.symlink(realcfg, cfgdir)
-            self.symlink(real_include, os.path.join(resdir, 'include'))
+            force_symlink(realcfg, cfgdir)
+            force_symlink(real_include, os.path.join(resdir, 'include'))
         else:
             self.mkpath(cfgdir)
             for fn in 'Makefile', 'Setup', 'Setup.local', 'Setup.config':
@@ -1020,7 +976,7 @@ class py2plugin(Command):
         copy_tree(self.framework_dir, os.path.join(appdir, 'Contents', 'Frameworks'), 
             preserve_symlinks=True)
         for pkg in self.packages:
-            pkg = self.get_bootstrap(pkg)
+            pkg = get_bootstrap(pkg)
             dst = os.path.join(pydir, os.path.basename(pkg))
             self.mkpath(dst)
             copy_tree(pkg, dst)
@@ -1030,30 +986,8 @@ class py2plugin(Command):
                 os.path.splitext(copyext.filename)[1])
             )
             self.mkpath(os.path.dirname(fn))
-            copy_file(copyext.filename, fn, dry_run=self.dry_run)
+            copy_file_data(copyext.filename, fn, dry_run=self.dry_run)
 
         target.appdir = appdir
         return appdir
 
-    def create_loader(self, item):
-        # Hm, how to avoid needless recreation of this file?
-        slashname = item.identifier.replace('.', os.sep)
-        pathname = os.path.join(self.temp_dir, "%s.py" % slashname)
-        if os.path.exists(pathname):
-            if self.verbose:
-                print(("skipping python loader for extension %r"
-                    % (item.identifier,)))
-        else:
-            self.mkpath(os.path.dirname(pathname))
-            # and what about dry_run?
-            if self.verbose:
-                print(("creating python loader for extension %r"
-                    % (item.identifier,)))
-
-            fname = slashname + os.path.splitext(item.filename)[1]
-            source = make_loader(fname)
-            if not self.dry_run:
-                open(pathname, "w").write(source)
-            else:
-                return
-        return SourceModule(item.identifier, pathname)

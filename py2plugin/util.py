@@ -62,11 +62,11 @@ def copy_resource(source, destination, dry_run=0):
                     os.path.join(destination, fn), dry_run=dry_run)
 
     else:
-        copy_file(source, destination, dry_run=dry_run)
+        copy_file_data(source, destination, dry_run=dry_run)
 
 
 
-def copy_file(source, destination, dry_run=0):
+def copy_file_data(source, destination, dry_run=0):
     zf, zp = path_to_zip(source)
     if zf is None:
         data = open(zp,'rb').read()
@@ -326,7 +326,7 @@ byte_compile(files, optimize=%r, force=%r,
                         # Minor problem: This will happily copy a file
                         # <mod>.pyo to <mod>.pyc or <mod>.pyc to
                         # <mod>.pyo, but it does seem to work.
-                        copy_file(mod.filename, cfile)
+                        copy_file_data(mod.filename, cfile)
                     else:
                         raise RuntimeError \
                               ("Don't know how to handle %r" % mod.filename)
