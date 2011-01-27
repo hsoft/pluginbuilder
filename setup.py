@@ -58,7 +58,6 @@ setup(
     package_data={
         'py2plugin.bundletemplate': [
             'prebuilt/main',
-            'lib/__error__.sh',
             'lib/site.py',
             'src/main.m',
         ],

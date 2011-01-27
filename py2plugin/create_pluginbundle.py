@@ -40,7 +40,3 @@ def create_pluginbundle(destdir, name, extension='.plugin', module=py2plugin.bun
         copyfn=copy,
     )
     return plugin, plist
-
-if __name__ == '__main__':
-    import sys
-    create_pluginbundle('build', sys.argv[1])

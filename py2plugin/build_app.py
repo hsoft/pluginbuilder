@@ -25,8 +25,8 @@ from macholib.util import has_filename_filter
 
 from py2plugin.create_pluginbundle import create_pluginbundle
 from py2plugin.util import (fancy_split, byte_compile, make_loader, copy_tree,
-    fsencoding, strip_files, in_system_path, makedirs, iter_platform_files, find_version, skipscm,
-    copy_file, os_path_isdir, copy_resource)
+    strip_files, in_system_path, makedirs, iter_platform_files, skipscm, copy_file,
+    os_path_isdir, copy_resource, SCMDIRS)
 from py2plugin.filters import not_stdlib_filter
 from py2plugin import recipes
 
@@ -173,12 +173,8 @@ class py2plugin(Command):
          "output module cross-reference as html"),
         ("no-strip", None,
          "do not strip debug and local symbols from output"),
-        #("compressed", 'c',
-        # "create a compressed zipfile"),
         ("no-chdir", 'C',
          "do not change to the data directory (Contents/Resources) [forced for plugins]"),
-        #("no-zip", 'Z',
-        # "do not use a zip file (XXX)"),
         ("semi-standalone", 's',
          "depend on an existing installation of Python " + installation_info()),
         ("alias", 'A',
@@ -202,14 +198,12 @@ class py2plugin(Command):
         ]
 
     boolean_options = [
-        #"compressed",
         "xref",
         "strip",
         "no-strip",
         "site-packages",
         "semi-standalone",
         "alias",
-        #"no-zip",
         "use-pythonpath",
         "no-chdir",
         "debug-modulegraph",
@@ -223,7 +217,6 @@ class py2plugin(Command):
         self.bdist_base = None
         self.xref = False
         self.graph = False
-        self.no_zip = 0
         self.optimize = 0
         self.strip = True
         self.no_strip = False
@@ -240,7 +233,6 @@ class py2plugin(Command):
         self.frameworks = None
         self.resources = None
         self.plist = None
-        self.compressed = True
         self.semi_standalone = is_system()
         self.dist_dir = None
         self.debug_skip_macholib = False
@@ -320,11 +312,6 @@ class py2plugin(Command):
         target = self.targets[0]
 
         version = self.distribution.get_version()
-        if version == '0.0.0':
-            try:
-                version = find_version(target.script)
-            except ValueError:
-                pass
         plist['CFBundleVersion'] = version
 
         name = self.distribution.get_name()
@@ -418,9 +405,7 @@ class py2plugin(Command):
         dist = self.distribution
         allres = chain(getattr(dist, 'data_files', ()) or (), self.resources)
         for (path, files) in map(normalize_data_file, allres):
-            path = fsencoding(path)
             for fn in files:
-                fn = fsencoding(fn)
                 yield fn, os.path.join(path, os.path.basename(fn))
 
     def collect_scripts(self):
@@ -752,7 +737,7 @@ class py2plugin(Command):
         for dname in package.packagepath:
             filenames = list(filter(datafilter, os_listdir(dname)))
             for fname in filenames:
-                if fname in ('.svn', 'CVS'):
+                if fname in SCMDIRS:
                     # Scrub revision manager junk
                     continue
                 if fname in ('__pycache__',):
@@ -993,7 +978,6 @@ class py2plugin(Command):
             plist=self.plist,
             extension=self.extension,
         )
-        appdir = fsencoding(appdir)
         resdir = os.path.join(appdir, 'Contents', 'Resources')
         return appdir, resdir, plist
     

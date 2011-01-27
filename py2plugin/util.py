@@ -146,50 +146,11 @@ def newer(source, target):
 
     return msource > mtarget
 
-
-
-def find_version(fn):
-    """
-    Try to find a __version__ assignment in a source file
-    """
-    return "0.0.0"
-    import compiler
-    from compiler.ast import Module, Stmt, Assign, AssName, Const
-    ast = compiler.parseFile(fn)
-    if not isinstance(ast, Module):
-        raise ValueError("expecting Module")
-    statements = ast.getChildNodes()
-    if not (len(statements) == 1 and isinstance(statements[0], Stmt)):
-        raise ValueError("expecting one Stmt")
-    for node in statements[0].getChildNodes():
-        if not isinstance(node, Assign):
-            continue
-        if not len(node.nodes) == 1:
-            continue
-        assName = node.nodes[0]
-        if not (
-                isinstance(assName, AssName) and
-                isinstance(node.expr, Const) and
-                assName.flags == 'OP_ASSIGN' and
-                assName.name == '__version__'
-                ):
-            continue
-        return node.expr.value
-    else:
-        raise ValueError("Version not found")
-
 def in_system_path(filename):
     """
     Return True if the file is in a system path
     """
     return macholib.util.in_system_path(filename)
-
-if sys.version_info[0] == 2:
-    def fsencoding(s, encoding=sys.getfilesystemencoding()):
-        return macholib.util.fsencoding(s, encoding=encoding)
-else:
-    def fsencoding(s, encoding=sys.getfilesystemencoding()):
-        return s
 
 def make_exec(path):
     mask = os.umask(0)
@@ -197,7 +158,6 @@ def make_exec(path):
     os.chmod(path, os.stat(path).st_mode | (0o111 & ~mask))
 
 def makedirs(path):
-    path = fsencoding(path)
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -375,17 +335,14 @@ byte_compile(files, optimize=%r, force=%r,
                     print("skipping byte-compilation of %s to %s" % \
                           (mod.filename, dfile))
 
-SCMDIRS = ['CVS', '.svn']
+SCMDIRS = {'CVS', '.svn', '.hg', '.git'}
 def skipscm(ofn):
-    ofn = fsencoding(ofn)
     fn = os.path.basename(ofn)
     if fn in SCMDIRS:
         return False
     return True
 
 def skipfunc(junk=(), junk_exts=(), chain=()):
-    junk = set(junk)
-    junk_exts = set(junk_exts)
     chain = tuple(chain)
     def _skipfunc(fn):
         if os.path.basename(fn) in junk:
@@ -399,8 +356,8 @@ def skipfunc(junk=(), junk_exts=(), chain=()):
             return True
     return _skipfunc
 
-JUNK = ['.DS_Store', '.gdb_history', 'build', 'dist'] + SCMDIRS
-JUNK_EXTS = ['.pbxuser', '.pyc', '.pyo', '.swp']
+JUNK = {'.DS_Store', '.gdb_history', 'build', 'dist', '__pycache__'} | SCMDIRS
+JUNK_EXTS = {'.pbxuser', '.pyc', '.pyo', '.swp'}
 skipjunk = skipfunc(JUNK, JUNK_EXTS)
 
 def get_magic(platform=sys.platform):
@@ -476,9 +433,6 @@ def copy_tree(src, dst,
     from distutils.errors import DistutilsFileError
     from distutils import log
 
-    src = fsencoding(src)
-    dst = fsencoding(dst)
-
     if condition is None:
         condition = skipscm
 
@@ -545,18 +499,3 @@ def find_app(app):
         if os.path.exists(dpath):
             return dpath
     return None
-
-MOMC = '/Library/Application Support/Apple/Developer Tools/Plug-ins/XDCoreDataModel.xdplugin/Contents/Resources/momc'
-if not os.path.exists(MOMC):
-    MOMC = '/Developer/Library/Xcode/Plug-ins/XDCoreDataModel.xdplugin/Contents/Resources/momc'
-if not os.path.exists(MOMC):
-    MOMC = '/Developer/usr/bin/momc'
-
-def momc(src, dst):
-    os.spawnv(os.P_WAIT, MOMC, [MOMC, src, dst])
-
-MAPC = '/Developer/Library/Xcode/Plug-ins/XDMappingModel.xdplugin/Contents/Resources/mapc'
-if not os.path.exists(MAPC):
-    MAPC = '/Developer/usr/bin/mapc'
-def mapc(src, dst):
-    os.spawnv(os.P_WAIT, MAPC, [MAPC, src, dst])
