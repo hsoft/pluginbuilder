@@ -1,9 +1,10 @@
+syntax: glob
+
 doc/_build
 build
 dist
-py2app.egg-info
+py2plugin.egg-info
 .DS_Store
 __pycache__
 
-syntax: glob
 *.dSYM
