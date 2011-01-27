@@ -33,10 +33,6 @@ from py2plugin import recipes
 from distutils.sysconfig import get_config_var
 PYTHONFRAMEWORK=get_config_var('PYTHONFRAMEWORK')
 
-def framework_copy_condition(src):
-    # Skip Headers, .svn, and CVS dirs
-    return skipscm(src) and os.path.basename(src) != 'Headers'
-
 class PythonStandalone(macholib.MachOStandalone.MachOStandalone):
     def __init__(self, appbuilder, *args, **kwargs):
         super(PythonStandalone, self).__init__(*args, **kwargs)
@@ -87,14 +83,6 @@ class Target(object):
                 raise DistutilsOptionError(
                     "Resource filename '%s' does not exist" % (r_filename,))
 
-
-def validate_target(dist, attr, value):
-    res = FixupTargets(value, "script")
-    other = {"app": "plugin", "plugin": "app"}
-    if res and getattr(dist, other[attr]):
-        # XXX - support apps and plugins?
-        raise DistutilsOptionError(
-            "You must specify either app or plugin, not both")
 
 def FixupTargets(targets, default_attribute):
     if not targets:
@@ -173,8 +161,6 @@ class py2plugin(Command):
          "output module cross-reference as html"),
         ("no-strip", None,
          "do not strip debug and local symbols from output"),
-        ("no-chdir", 'C',
-         "do not change to the data directory (Contents/Resources) [forced for plugins]"),
         ("semi-standalone", 's',
          "depend on an existing installation of Python " + installation_info()),
         ("alias", 'A',
@@ -205,7 +191,6 @@ class py2plugin(Command):
         "semi-standalone",
         "alias",
         "use-pythonpath",
-        "no-chdir",
         "debug-modulegraph",
         "debug-skip-macholib",
         "graph",
@@ -622,7 +607,6 @@ class py2plugin(Command):
 
     def create_binaries(self, py_files, pkgdirs, extensions, loader_files):
         print("*** create binaries ***")
-        dist = self.distribution
         pkgexts = []
         copyexts = []
         extmap = {}
@@ -652,7 +636,7 @@ class py2plugin(Command):
         byte_compile(py_files,
                      target_dir=self.collect_dir,
                      optimize=self.optimize,
-                     force=self.force,
+                     force=True,
                      verbose=self.verbose,
                      dry_run=self.dry_run)
 
@@ -669,7 +653,7 @@ class py2plugin(Command):
             for fn in files:
                 destfn = os.path.join(dest, os.path.basename(fn))
                 if os.path.isdir(fn):
-                    self.copy_tree(fn, destfn, preserve_symlinks=False)
+                    copy_tree(fn, destfn, preserve_symlinks=False)
                 else:
                     self.copy_file(fn, destfn)
 
@@ -792,9 +776,7 @@ class py2plugin(Command):
     def copy_dylib(self, src, dst):
         # will be copied from the framework?
         if src != sys.executable:
-            force, self.force = self.force, True
             self.copy_file(src, dst)
-            self.force = force
         return dst
 
     def copy_versioned_framework(self, info, dst):
@@ -802,43 +784,38 @@ class py2plugin(Command):
         #       could have both Python 2.3 and 2.4, or Tk 8.4 and 8.5, etc.
         #       Saves a good deal of space, and I'm pretty sure this ugly
         #       hack is correct in the general case.
-        version = info['version']
-        if version is None:
-            return self.raw_copy_framework(info, dst)
+        def framework_copy_condition(src):
+            # Skip Headers, .svn, and CVS dirs
+            return skipscm(src) and os.path.basename(src) != 'Headers'
+        
         short = info['shortname'] + '.framework'
         infile = os.path.join(info['location'], short)
         outfile = os.path.join(dst, short)
-        vsplit = os.path.join(infile, 'Versions').split(os.sep)
-        def condition(src, vsplit=vsplit, version=version):
-            srcsplit = src.split(os.sep)
-            if (
-                    len(srcsplit) > len(vsplit) and
-                    srcsplit[:len(vsplit)] == vsplit and
-                    srcsplit[len(vsplit)] != version and
-                    not os.path.islink(src)
-                ):
-                return False
-            # Skip Headers, .svn, and CVS dirs
-            return framework_copy_condition(src)
-
-        return self.copy_tree(infile, outfile,
-            preserve_symlinks=True, condition=condition)
-
+        version = info['version']
+        if version is None:
+            condition = framework_copy_condition
+        else:
+            vsplit = os.path.join(infile, 'Versions').split(os.sep)
+            def condition(src, vsplit=vsplit, version=version):
+                srcsplit = src.split(os.sep)
+                if (
+                        len(srcsplit) > len(vsplit) and
+                        srcsplit[:len(vsplit)] == vsplit and
+                        srcsplit[len(vsplit)] != version and
+                        not os.path.islink(src)
+                    ):
+                    return False
+                # Skip Headers, .svn, and CVS dirs
+                return framework_copy_condition(src)
+        
+        return copy_tree(infile, outfile, preserve_symlinks=True, condition=condition)
+    
     def copy_framework(self, info, dst):
-        force, self.force = self.force, True
         if info['shortname'] == PYTHONFRAMEWORK:
             self.copy_python_framework(info, dst)
         else:
             self.copy_versioned_framework(info, dst)
-        self.force = force
         return os.path.join(dst, info['name'])
-
-    def raw_copy_framework(self, info, dst):
-        short = info['shortname'] + '.framework'
-        infile = os.path.join(info['location'], short)
-        outfile = os.path.join(dst, short)
-        return self.copy_tree(infile, outfile,
-            preserve_symlinks=True, condition=framework_copy_condition)
 
     def copy_python_framework(self, info, dst):
         # XXX - In this particular case we know exactly what we can
@@ -877,14 +854,11 @@ class py2plugin(Command):
     def fixup_distribution(self):
         dist = self.distribution
 
-        # Trying to obtain app and plugin from dist for backward compatibility
+        # Trying to obtain plugin from dist for backward compatibility
         # reasons.
-        app = dist.app
         plugin = dist.plugin
-        # If we can get suitable values from self.app and self.plugin, we prefer
-        # them.
-        if self.app is not None or self.plugin is not None:
-            app = self.app
+        # If we can get suitable value from self.plugin, we prefer it.
+        if self.plugin is not None:
             plugin = self.plugin
 
         # Convert our args into target objects.
@@ -1067,10 +1041,6 @@ class py2plugin(Command):
 
         self.copy_file(script, resdir)
         pydir = os.path.join(resdir, 'lib', 'python' + sys.version[:3])
-        if sys.version_info[0] == 2:
-            arcdir = os.path.join(resdir, 'lib', 'python' + sys.version[:3])
-        else:
-            arcdir = os.path.join(resdir, 'lib')
         self.mkpath(pydir)
         self.symlink('../../site.py', os.path.join(pydir, 'site.py'))
         realcfg = os.path.dirname(sysconfig.get_makefile_filename())
@@ -1094,18 +1064,17 @@ class py2plugin(Command):
             self.copy_file(pyconfig_path, os.path.join(inc_dir, 'pyconfig.h'))
 
 
-        self.copy_tree(self.collect_dir, pydir)
+        copy_tree(self.collect_dir, pydir)
         
         ext_dir = os.path.join(pydir, os.path.basename(self.ext_dir))
-        self.copy_tree(self.ext_dir, ext_dir, preserve_symlinks=True)
-        self.copy_tree(self.framework_dir,
-            os.path.join(appdir, 'Contents', 'Frameworks'),
+        copy_tree(self.ext_dir, ext_dir, preserve_symlinks=True)
+        copy_tree(self.framework_dir, os.path.join(appdir, 'Contents', 'Frameworks'), 
             preserve_symlinks=True)
         for pkg in self.packages:
             pkg = self.get_bootstrap(pkg)
             dst = os.path.join(pydir, os.path.basename(pkg))
             self.mkpath(dst)
-            self.copy_tree(pkg, dst)
+            copy_tree(pkg, dst)
         for copyext in copyexts:
             fn = os.path.join(ext_dir,
                 (copyext.identifier.replace('.', os.sep) +
@@ -1139,18 +1108,3 @@ class py2plugin(Command):
             else:
                 return
         return SourceModule(item.identifier, pathname)
-
-    def copy_tree(self, infile, outfile,
-                   preserve_mode=1, preserve_times=1, preserve_symlinks=0,
-                   level=1, condition=None):
-        """Copy an entire directory tree respecting verbose, dry-run,
-        and force flags.
-
-        This version doesn't bork on existing symlinks
-        """
-        return copy_tree(
-            infile, outfile,
-            preserve_mode,preserve_times,preserve_symlinks,
-            not self.force,
-            dry_run=self.dry_run,
-            condition=condition)

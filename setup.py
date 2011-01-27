@@ -9,10 +9,6 @@ except ImportError:
 import sys, os
 import os.path
 from setuptools import setup, find_packages
-from distutils.errors  import DistutilsError
-from distutils import log
-
-from pkg_resources import require, DistributionNotFound
 
 LONG_DESCRIPTION = open('README.txt').read()
 
@@ -37,7 +33,6 @@ if not os.path.exists('py2plugin/bundletemplate/prebuilt/main'):
     sys.exit(1)
 
 setup(
-    # metadata
     name='py2plugin',
     version='0.1.0',
     description='Create standalone Mac OS X plugins with Python',
@@ -65,9 +60,6 @@ setup(
     entry_points={
         'distutils.commands': [
             "py2plugin = py2plugin.build_app:py2plugin",
-        ],
-        'distutils.setup_keywords': [
-            "plugin = py2plugin.build_app:validate_target",
         ],
     },
     zip_safe=False,
