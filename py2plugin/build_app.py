@@ -56,56 +56,13 @@ def iterRecipes(module=recipes):
         if check is not None:
             yield (name, check)
 
-# A very loosely defined "target".  We assume either a "script" or "modules"
-# attribute.  Some attributes will be target specific.
-class Target(object):
-    def __init__(self, **kw):
-        self.__dict__.update(kw)
-        # If modules is a simple string, assume they meant list
-        m = self.__dict__.get("modules")
-        if m and isinstance(m, str):
-            self.modules = [m]
-
+class Target:
+    def __init__(self, script):
+        self.script = script
+    
     def get_dest_base(self):
-        dest_base = getattr(self, "dest_base", None)
-        if dest_base: return dest_base
-        script = getattr(self, "script", None)
-        if script:
-            return os.path.basename(os.path.splitext(script)[0])
-        modules = getattr(self, "modules", None)
-        assert modules, "no script, modules or dest_base specified"
-        return modules[0].split(".")[-1]
-
-    def validate(self):
-        resources = getattr(self, "resources", [])
-        for r_filename in resources:
-            if not os.path.isfile(r_filename):
-                raise DistutilsOptionError(
-                    "Resource filename '%s' does not exist" % (r_filename,))
-
-
-def FixupTargets(targets, default_attribute):
-    if not targets:
-        return targets
-    try:
-        targets = eval(targets)
-    except:
-        pass
-    ret = []
-    for target_def in targets:
-        if isinstance(target_def, str):
-            # Create a default target object, with the string as the attribute
-            target = Target(**{default_attribute: target_def})
-        else:
-            d = getattr(target_def, "__dict__", target_def)
-            if default_attribute not in d:
-                raise DistutilsOptionError(
-                    "This target class requires an attribute '%s'"
-                    % (default_attribute,))
-            target = Target(**d)
-        target.validate()
-        ret.append(target)
-    return ret
+        return os.path.basename(os.path.splitext(self.script)[0])
+    
 
 def normalize_data_file(fn):
     if isinstance(fn, str):
@@ -153,8 +110,6 @@ class py2plugin(Command):
          "comma-separated list of additional frameworks and dylibs to include"),
         ("plist=", 'P',
          "Info.plist template file, dict, or plistlib.Plist"),
-        ("extension=", None,
-         "Bundle extension [default:.plugin]"),
         ("graph", 'g',
          "output module dependency graph"),
         ("xref", 'x',
@@ -206,7 +161,6 @@ class py2plugin(Command):
         self.strip = True
         self.no_strip = False
         self.iconfile = None
-        self.extension = None
         self.alias = 0
         self.argv_inject = None
         self.site_packages = False
@@ -862,14 +816,10 @@ class py2plugin(Command):
             plugin = self.plugin
 
         # Convert our args into target objects.
-        dist.plugin = FixupTargets(plugin, "script")
-        self.targets = dist.plugin
+        self.targets = [Target(script) for script in plugin]
         if len(self.targets) != 1:
             # XXX - support multiple targets?
-            raise DistutilsOptionError(
-                "Multiple targets not currently supported")
-        if not self.extension:
-            self.extension = '.plugin'
+            raise DistutilsOptionError("Multiple targets not currently supported")
 
         # make sure all targets use the same directory, this is
         # also the directory where the pythonXX.dylib must reside
@@ -950,7 +900,6 @@ class py2plugin(Command):
             appdir,
             appname,
             plist=self.plist,
-            extension=self.extension,
         )
         resdir = os.path.join(appdir, 'Contents', 'Resources')
         return appdir, resdir, plist
