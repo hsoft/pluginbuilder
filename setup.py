@@ -7,6 +7,7 @@ except ImportError:
     distribute_setup.use_setuptools()
 
 import sys, os
+import os.path
 from setuptools import setup, find_packages
 from distutils.errors  import DistutilsError
 from distutils import log
@@ -31,6 +32,10 @@ CLASSIFIERS = [
         'Topic :: Software Development :: User Interfaces',
         'Topic :: Software Development :: Build Tools',
 ]
+
+if not os.path.exists('py2plugin/bundletemplate/prebuilt/main'):
+    print("Run py2plugin/bundletemplate first.")
+    sys.exit(1)
 
 if sys.version_info[0] == 3:
     extra_args = dict(use_2to3=True)
@@ -58,14 +63,7 @@ setup(
     packages=find_packages(),
     package_data={
         'py2plugin.bundletemplate': [
-            'prebuilt/main-i386',
-            'prebuilt/main-ppc',
-            'prebuilt/main-x86_64',
-            'prebuilt/main-ppc64',
-            'prebuilt/main-fat',
-            'prebuilt/main-fat3',
-            'prebuilt/main-intel',
-            'prebuilt/main-universal',
+            'prebuilt/main',
             'lib/__error__.sh',
             'lib/site.py',
             'src/main.m',

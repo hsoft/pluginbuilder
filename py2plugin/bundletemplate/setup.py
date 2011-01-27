@@ -4,59 +4,51 @@ import sys
 import distutils.sysconfig
 import distutils.util
 
-gPreBuildVariants = [
-    {
-        'name': 'main-universal',
+ARCH_BUILD_FLAGS = {
+    'universal': {
         'target': '10.5',
         'cflags': '-isysroot /Developer/SDKs/MacOSX10.5.sdk -arch i386 -arch ppc -arch ppc64 -arch x86_64',
         'cc': 'gcc-4.2',
     },
-    {
-        'name': 'main-ppc64',
+    'ppc64': {
         'target': '10.5',
         'cflags': '-isysroot /Developer/SDKs/MacOSX10.5.sdk -arch x86_64',
         'cc': 'gcc-4.2',
     },
-    {
-        'name': 'main-x86_64',
+    'x86_64': {
         'target': '10.5',
         'cflags': '-isysroot / -arch x86_64',
         'cc': 'gcc-4.2',
     },
-    {
-        'name': 'main-fat3',
+    'fat3': {
         'target': '10.5',
         'cflags': '-isysroot / -arch i386 -arch ppc -arch x86_64',
         'cc': 'gcc-4.2',
     },
-    {
-        'name': 'main-intel',
+    'intel': {
         'target': '10.5',
         'cflags': '-isysroot / -arch i386 -arch x86_64',
         'cc': 'gcc-4.2',
     },
-    {
-        'name': 'main-i386',
+    'i386': {
         'target': '10.3',
         'cflags': '-isysroot /Developer/SDKs/MacOSX10.4u.sdk -arch i386',
         'cc': 'gcc-4.0',
     },
-    {
-        'name': 'main-ppc',
+    'ppc': {
         'target': '10.3',
         'cflags': '-isysroot /Developer/SDKs/MacOSX10.4u.sdk -arch ppc',
         'cc': 'gcc-4.0',
     },
-    {
-        'name': 'main-fat',
+    'fat': {
         'target': '10.3',
         'cflags': '-isysroot /Developer/SDKs/MacOSX10.4u.sdk -arch i386 -arch ppc',
         'cc': 'gcc-4.0',
     },
-]
+}
 
 
-def main(all=False):
+def main():
     basepath = os.path.dirname(__file__)
     builddir = os.path.join(basepath, 'prebuilt')
     if not os.path.exists(builddir):
@@ -85,26 +77,18 @@ def main(all=False):
             sys.version_info[:2] == (2,5):
         arch = "fat"
 
-    name = 'main-' + arch
+    arch_flags = ARCH_BUILD_FLAGS[arch]
+    CC=arch_flags['cc']
+    CFLAGS = BASE_CFLAGS + ' ' + arch_flags['cflags']
+    os.environ['MACOSX_DEPLOYMENT_TARGET'] = arch_flags['target']
+    dest = os.path.join(builddir, 'main')
+    if not os.path.exists(dest) or (
+            os.stat(dest).st_mtime < os.stat(src).st_mtime):
+        os.system('"%(CC)s" -o "%(dest)s" "%(src)s" %(CFLAGS)s' % locals())
 
-    for entry in gPreBuildVariants:
-        if (not all) and entry['name'] != name: continue
-
-        CC=entry['cc']
-        CFLAGS = BASE_CFLAGS + ' ' + entry['cflags']
-        os.environ['MACOSX_DEPLOYMENT_TARGET'] = entry['target']
-        dest = os.path.join(builddir, entry['name'])
-        if not os.path.exists(dest) or (
-                os.stat(dest).st_mtime < os.stat(src).st_mtime):
-            os.system('"%(CC)s" -o "%(dest)s" "%(src)s" %(CFLAGS)s' % locals())
-
-    dest = os.path.join(
-            builddir,
-            'main-' + arch
-    )
-
+    dest = os.path.join(builddir, 'main')
     return dest
 
 
 if __name__ == '__main__':
-    main(all=True)
+    main()
