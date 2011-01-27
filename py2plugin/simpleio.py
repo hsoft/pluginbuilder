@@ -26,11 +26,11 @@ class FileIO (object):
         fname = os.join(self.prefix, path)
         dirname = os.path.dirname(fname)
         if not os.path.exists(fname):
-            os.makedirs(fname, mode=0755)
+            os.makedirs(fname, mode=0o755)
         fp = open(fname, 'wb')
         fp.write(data)
         fp.close()
-        os.chmod(fname, 0444)
+        os.chmod(fname, 0o444)
 
 class ReadOnlyIO (object):
     """

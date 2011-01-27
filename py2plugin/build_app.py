@@ -1,58 +1,37 @@
-"""
-Mac OS X .app build command for distutils
-
-Originally (loosely) based on code from py2exe's build_exe.py by Thomas Heller.
-"""
-from pkg_resources import require
-require("altgraph", "modulegraph", "macholib")
-
 import imp
 import sys
 import os
-import zipfile
 import plistlib
 import shlex
 import shutil
-from cStringIO import StringIO
-
-from itertools import chain, imap
+from io import StringIO
+import sysconfig
+from itertools import chain
 
 
 from setuptools import Command
 from distutils.util import convert_path
 from distutils import log
-from distutils.errors import *
-
-from altgraph.compat import *
+from distutils.errors import DistutilsOptionError
+from pkg_resources import require
 
 from modulegraph.find_modules import find_modules, parse_mf_results
 from modulegraph.modulegraph import SourceModule, Package, os_listdir
+from modulegraph.util import imp_find_module
 
 import macholib.dyld
 import macholib.MachOStandalone
+from macholib.util import has_filename_filter
 
 from py2plugin.create_pluginbundle import create_pluginbundle
-from py2plugin.util import \
-    fancy_split, byte_compile, make_loader, imp_find_module, \
-    copy_tree, fsencoding, strip_files, in_system_path, makedirs, \
-    iter_platform_files, find_version, skipscm, momc, copy_file, \
-    os_path_isdir, copy_resource
-from py2plugin.filters import \
-    not_stdlib_filter, not_system_filter, has_filename_filter
+from py2plugin.util import (fancy_split, byte_compile, make_loader, copy_tree,
+    fsencoding, strip_files, in_system_path, makedirs, iter_platform_files, find_version, skipscm,
+    copy_file, os_path_isdir, copy_resource)
+from py2plugin.filters import not_stdlib_filter
 from py2plugin import recipes
 
 from distutils.sysconfig import get_config_var
 PYTHONFRAMEWORK=get_config_var('PYTHONFRAMEWORK')
-
-if sys.version_info[0] >= 3:
-    try:
-        import sysconfig
-        has_sysconfig = True
-    except ImportError:
-        has_sysconfig = False
-else:
-    # Python 2.7 has sysconfig, but we still must use the "old fashion" packaging style with it.
-    has_sysconfig = False
 
 def framework_copy_condition(src):
     # Skip Headers, .svn, and CVS dirs
@@ -88,7 +67,7 @@ class Target(object):
         self.__dict__.update(kw)
         # If modules is a simple string, assume they meant list
         m = self.__dict__.get("modules")
-        if m and isinstance(m, basestring):
+        if m and isinstance(m, str):
             self.modules = [m]
 
     def get_dest_base(self):
@@ -126,7 +105,7 @@ def FixupTargets(targets, default_attribute):
         pass
     ret = []
     for target_def in targets:
-        if isinstance(target_def, basestring):
+        if isinstance(target_def, str):
             # Create a default target object, with the string as the attribute
             target = Target(**{default_attribute: target_def})
         else:
@@ -141,7 +120,7 @@ def FixupTargets(targets, default_attribute):
     return ret
 
 def normalize_data_file(fn):
-    if isinstance(fn, basestring):
+    if isinstance(fn, str):
         fn = convert_path(fn)
         return ('', [fn])
     return fn
@@ -275,7 +254,7 @@ class py2plugin(Command):
         elif self.no_strip:
             self.strip = False
         self.optimize = int(self.optimize)
-        if self.argv_inject and isinstance(self.argv_inject, basestring):
+        if self.argv_inject and isinstance(self.argv_inject, str):
             self.argv_inject = shlex.split(self.argv_inject)
         self.includes = set(fancy_split(self.includes))
         self.includes.add('encodings.*')
@@ -311,7 +290,7 @@ class py2plugin(Command):
             self.frameworks.append(res)
         if not self.plist:
             self.plist = {}
-        if isinstance(self.plist, basestring):
+        if isinstance(self.plist, str):
             self.plist = plistlib.Plist.fromFile(self.plist)
         if isinstance(self.plist, plistlib.Dict):
             self.plist = dict(self.plist.__dict__)
@@ -325,7 +304,7 @@ class py2plugin(Command):
         if self.semi_standalone:
             self.filters.append(not_stdlib_filter)
 
-        if self.iconfile is None and u'CFBundleIconFile' not in self.plist:
+        if self.iconfile is None and 'CFBundleIconFile' not in self.plist:
             # Default is the generic applet icon in the framework
             iconfile = os.path.join(sys.prefix, 'Resources', 'Python.app',
                 'Contents', 'Resources', 'PythonApplet.icns')
@@ -438,7 +417,7 @@ class py2plugin(Command):
     def iter_data_files(self):
         dist = self.distribution
         allres = chain(getattr(dist, 'data_files', ()) or (), self.resources)
-        for (path, files) in imap(normalize_data_file, allres):
+        for (path, files) in map(normalize_data_file, allres):
             path = fsencoding(path)
             for fn in files:
                 fn = fsencoding(fn)
@@ -451,7 +430,7 @@ class py2plugin(Command):
         for target in self.targets:
             scripts.add(target.script)
             scripts.update([
-                k for k in target.prescripts if isinstance(k, basestring)
+                k for k in target.prescripts if isinstance(k, str)
             ])
 
         return scripts
@@ -482,7 +461,7 @@ class py2plugin(Command):
                 raise DistutilsOptionError("icon file must exist: %r"
                     % (self.iconfile,))
             self.resources.append(iconfile)
-            plist[u'CFBundleIconFile'] = os.path.basename(iconfile)
+            plist['CFBundleIconFile'] = os.path.basename(iconfile)
         self.plist = plist
         return plist
 
@@ -514,25 +493,25 @@ class py2plugin(Command):
     def process_recipes(self, mf, filters, flatpackages, loader_files):
         rdict = self.collect_recipedict()
         while True:
-            for name, check in rdict.iteritems():
+            for name, check in rdict.items():
                 rval = check(self, mf)
                 if rval is None:
                     continue
                 # we can pull this off so long as we stop the iter
                 del rdict[name]
-                print '*** using recipe: %s ***' % (name,)
+                print('*** using recipe: %s ***' % (name,))
                 self.packages.update(rval.get('packages', ()))
                 for pkg in rval.get('flatpackages', ()):
-                    if isinstance(pkg, basestring):
+                    if isinstance(pkg, str):
                         pkg = (os.path.basename(pkg), pkg)
                     flatpackages[pkg[0]] = pkg[1]
                 filters.extend(rval.get('filters', ()))
                 loader_files.extend(rval.get('loader_files', ()))
-                newbootstraps = map(self.get_bootstrap,
-                    rval.get('prescripts', ()))
+                newbootstraps = list(map(self.get_bootstrap,
+                    rval.get('prescripts', ())))
 
                 for fn in newbootstraps:
-                    if isinstance(fn, basestring):
+                    if isinstance(fn, str):
                         mf.run_script(fn)
                 for target in self.targets:
                     target.prescripts.extend(newbootstraps)
@@ -555,12 +534,12 @@ class py2plugin(Command):
             pdb.post_mortem(sys.exc_info()[2])
 
     def filter_dependencies(self, mf, filters):
-        print "*** filtering dependencies ***"
+        print("*** filtering dependencies ***")
         nodes_seen, nodes_removed, nodes_orphaned = mf.filterStack(filters)
-        print '%d total' % (nodes_seen,)
-        print '%d filtered' % (nodes_removed,)
-        print '%d orphaned' % (nodes_orphaned,)
-        print '%d remaining' % (nodes_seen - nodes_removed,)
+        print('%d total' % (nodes_seen,))
+        print('%d filtered' % (nodes_removed,))
+        print('%d orphaned' % (nodes_orphaned,))
+        print('%d remaining' % (nodes_seen - nodes_removed,))
 
     def get_appname(self):
         return self.plist['CFBundleName']
@@ -571,8 +550,8 @@ class py2plugin(Command):
             appdir = os.path.join(self.dist_dir, os.path.dirname(base))
             appname = self.get_appname()
             dgraph = os.path.join(appdir, appname + '.html')
-            print ("*** creating dependency html: %s ***"
-                % (os.path.basename(dgraph),))
+            print(("*** creating dependency html: %s ***"
+                % (os.path.basename(dgraph),)))
             mf.create_xref(open(dgraph, 'w'))
 
     def build_graph(self, mf, flatpackages):
@@ -581,8 +560,8 @@ class py2plugin(Command):
             appdir = os.path.join(self.dist_dir, os.path.dirname(base))
             appname = self.get_appname()
             dgraph = os.path.join(appdir, appname + '.dot')
-            print ("*** creating dependency graph: %s ***"
-                % (os.path.basename(dgraph),))
+            print(("*** creating dependency graph: %s ***"
+                % (os.path.basename(dgraph),)))
             mf.graphreport(open(dgraph, 'w'), flatpackages=flatpackages)
 
     def finalize_modulefinder(self, mf):
@@ -604,10 +583,10 @@ class py2plugin(Command):
         return py_files, extensions
 
     def collect_packagedirs(self):
-        return filter(os.path.exists, [
+        return list(filter(os.path.exists, [
             os.path.join(os.path.realpath(self.get_bootstrap(pkg)), '')
             for pkg in self.packages
-        ])
+        ]))
 
     def run_normal(self):
         mf = self.get_modulefinder()
@@ -657,7 +636,7 @@ class py2plugin(Command):
         self.mkpath(self.framework_dir)
 
     def create_binaries(self, py_files, pkgdirs, extensions, loader_files):
-        print "*** create binaries ***"
+        print("*** create binaries ***")
         dist = self.distribution
         pkgexts = []
         copyexts = []
@@ -671,7 +650,7 @@ class py2plugin(Command):
                     return None
             return fn
         if pkgdirs:
-            py_files = filter(packagefilter, py_files)
+            py_files = list(filter(packagefilter, py_files))
         for ext in extensions:
             fn = packagefilter(ext)
             if fn is None:
@@ -684,7 +663,7 @@ class py2plugin(Command):
             extmap[fn] = ext
 
         # byte compile the python modules into the target directory
-        print "*** byte compile python files ***"
+        print("*** byte compile python files ***")
         byte_compile(py_files,
                      target_dir=self.collect_dir,
                      optimize=self.optimize,
@@ -726,7 +705,7 @@ class py2plugin(Command):
                     if rest_path.startswith('.'):
                         rest_path = rest_path[1:]
 
-                    print "XXXX", os.path.join(prefix, rest_path)
+                    print("XXXX", os.path.join(prefix, rest_path))
                     self.copy_file(os.path.join(prefix, rest_path), execdst)
 
                 else:
@@ -771,7 +750,7 @@ class py2plugin(Command):
 
         target_dir = os.path.join(target_dir, *(package.identifier.split('.')))
         for dname in package.packagepath:
-            filenames = filter(datafilter, os_listdir(dname))
+            filenames = list(filter(datafilter, os_listdir(dname)))
             for fname in filenames:
                 if fname in ('.svn', 'CVS'):
                     # Scrub revision manager junk
@@ -806,20 +785,20 @@ class py2plugin(Command):
         for dirpath, dnames, fnames in os.walk(self.appdir):
             for nm in list(dnames):
                 if nm.endswith('.dSYM'):
-                    print "removing debug info: %s/%s"%(dirpath, nm)
+                    print("removing debug info: %s/%s"%(dirpath, nm))
                     shutil.rmtree(os.path.join(dirpath, nm))
                     dnames.remove(nm)
         return [file for file in platfiles if '.dSYM' not in file]
 
     def strip_files(self, files):
-        unstripped = 0L
+        unstripped = 0
         stripfiles = []
         for fn in files:
             unstripped += os.stat(fn).st_size
             stripfiles.append(fn)
             log.info('stripping %s', os.path.basename(fn))
         strip_files(stripfiles, dry_run=self.dry_run, verbose=self.verbose)
-        stripped = 0L
+        stripped = 0
         for fn in stripfiles:
             stripped += os.stat(fn).st_size
         log.info('stripping saved %d bytes (%d / %d)',
@@ -883,20 +862,15 @@ class py2plugin(Command):
         indir = os.path.dirname(os.path.join(info['location'], info['name']))
         outdir = os.path.dirname(os.path.join(dst, info['name']))
         self.mkpath(os.path.join(outdir, 'Resources'))
-        if has_sysconfig:
-            # Since python 3.2, the naming scheme for config files location has considerably
-            # complexified. The old, simple way doesn't work anymore. Fortunately, a new module was
-            # added to get such paths easily.
-            pyconfig_path = sysconfig.get_config_h_filename()
-            makefile_path = sysconfig.get_makefile_filename()
-            assert pyconfig_path.startswith(indir)
-            assert makefile_path.startswith(indir)
-            pyconfig_path = pyconfig_path[len(indir)+1:]
-            makefile_path = makefile_path[len(indir)+1:]
-        else:
-            pydir = 'python%s'%(info['version'])
-            pyconfig_path = 'include/%s/pyconfig.h' % (pydir, )
-            makefile_path = 'lib/%s/config/Makefile' % (pydir, )
+        # Since python 3.2, the naming scheme for config files location has considerably
+        # complexified. The old, simple way doesn't work anymore. Fortunately, a new module was
+        # added to get such paths easily.
+        pyconfig_path = sysconfig.get_config_h_filename()
+        makefile_path = sysconfig.get_makefile_filename()
+        assert pyconfig_path.startswith(indir)
+        assert makefile_path.startswith(indir)
+        pyconfig_path = pyconfig_path[len(indir)+1:]
+        makefile_path = makefile_path[len(indir)+1:]
 
         # distutils looks for some files relative to sys.executable, which
         # means they have to be in the framework...
@@ -981,7 +955,7 @@ class py2plugin(Command):
             prescripts.append('boot_aliasplugin')
         newprescripts = []
         for s in prescripts:
-            if isinstance(s, basestring):
+            if isinstance(s, str):
                 newprescripts.append(
                     self.get_bootstrap('py2plugin.bootstrap.' + s))
             else:
@@ -993,14 +967,14 @@ class py2plugin(Command):
 
 
     def get_bootstrap(self, bootstrap):
-        if isinstance(bootstrap, basestring):
+        if isinstance(bootstrap, str):
             if not os.path.exists(bootstrap):
                 bootstrap = imp_find_module(bootstrap)[1]
         return bootstrap
 
     def get_bootstrap_data(self, bootstrap):
         bootstrap = self.get_bootstrap(bootstrap)
-        if not isinstance(bootstrap, basestring):
+        if not isinstance(bootstrap, str):
             return bootstrap.getvalue()
         else:
             return open(bootstrap, 'rU').read()
@@ -1009,7 +983,7 @@ class py2plugin(Command):
         base = target.get_dest_base()
         appdir = os.path.join(self.dist_dir, os.path.dirname(base))
         appname = self.get_appname()
-        print "*** creating plugin bundle: %s ***" % (appname,)
+        print("*** creating plugin bundle: %s ***" % (appname,))
         if self.runtime_preferences and use_runtime_preference:
             self.plist.setdefault(
                 'PyRuntimeLocations', self.runtime_preferences)
@@ -1115,13 +1089,8 @@ class py2plugin(Command):
             arcdir = os.path.join(resdir, 'lib')
         self.mkpath(pydir)
         self.symlink('../../site.py', os.path.join(pydir, 'site.py'))
-        if has_sysconfig:
-            realcfg = os.path.dirname(sysconfig.get_makefile_filename())
-            cfgdir = os.path.join(resdir, os.path.relpath(realcfg, sys.prefix))
-        else:
-            realhome = os.path.join(sys.prefix, 'lib', 'python' + sys.version[:3])
-            cfgdir = os.path.join(pydir, 'config')
-            realcfg = os.path.join(realhome, 'config')
+        realcfg = os.path.dirname(sysconfig.get_makefile_filename())
+        cfgdir = os.path.join(resdir, os.path.relpath(realcfg, sys.prefix))
         real_include = os.path.join(sys.prefix, 'include')
         if self.semi_standalone:
             self.symlink(realcfg, cfgdir)
@@ -1133,11 +1102,8 @@ class py2plugin(Command):
                 if os.path.exists(rfn):
                     self.copy_file(rfn, os.path.join(cfgdir, fn))
 
-            if has_sysconfig:
-                # see copy_python_framework() for explanation.
-                pyconfig_path = sysconfig.get_config_h_filename()
-            else:
-                pyconfig_path = os.path.join(real_include, 'python%s/pyconfig.h' % (sys.version[:3]))
+            # see copy_python_framework() for explanation.
+            pyconfig_path = sysconfig.get_config_h_filename()
             pyconfig_path_relative = os.path.relpath(os.path.dirname(pyconfig_path), sys.prefix)
             inc_dir = os.path.join(resdir, pyconfig_path_relative)
             self.mkpath(inc_dir)
@@ -1173,14 +1139,14 @@ class py2plugin(Command):
         pathname = os.path.join(self.temp_dir, "%s.py" % slashname)
         if os.path.exists(pathname):
             if self.verbose:
-                print ("skipping python loader for extension %r"
-                    % (item.identifier,))
+                print(("skipping python loader for extension %r"
+                    % (item.identifier,)))
         else:
             self.mkpath(os.path.dirname(pathname))
             # and what about dry_run?
             if self.verbose:
-                print ("creating python loader for extension %r"
-                    % (item.identifier,))
+                print(("creating python loader for extension %r"
+                    % (item.identifier,)))
 
             fname = slashname + os.path.splitext(item.filename)[1]
             source = make_loader(fname)

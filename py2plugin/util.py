@@ -1,14 +1,7 @@
-from pkg_resources import require
-require("modulegraph", "altgraph", "macholib")
-
-import os, sys, imp, zipfile, time
-from modulegraph.find_modules import PY_SUFFIXES, C_SUFFIXES
-from modulegraph.util import *
+import os, sys, zipfile, time
+from modulegraph.find_modules import PY_SUFFIXES
 from modulegraph.modulegraph import os_listdir
-from altgraph.compat import *
 import macholib.util
-
-import pkg_resources
 
 def os_path_islink(path):
     """
@@ -164,10 +157,10 @@ def find_version(fn):
     from compiler.ast import Module, Stmt, Assign, AssName, Const
     ast = compiler.parseFile(fn)
     if not isinstance(ast, Module):
-        raise ValueError, "expecting Module"
+        raise ValueError("expecting Module")
     statements = ast.getChildNodes()
     if not (len(statements) == 1 and isinstance(statements[0], Stmt)):
-        raise ValueError, "expecting one Stmt"
+        raise ValueError("expecting one Stmt")
     for node in statements[0].getChildNodes():
         if not isinstance(node, Assign):
             continue
@@ -183,7 +176,7 @@ def find_version(fn):
             continue
         return node.expr.value
     else:
-        raise ValueError, "Version not found"
+        raise ValueError("Version not found")
 
 def in_system_path(filename):
     """
@@ -201,7 +194,7 @@ else:
 def make_exec(path):
     mask = os.umask(0)
     os.umask(mask)
-    os.chmod(path, os.stat(path).st_mode | (0111 & ~mask))
+    os.chmod(path, os.stat(path).st_mode | (0o111 & ~mask))
 
 def makedirs(path):
     path = fsencoding(path)
@@ -239,7 +232,7 @@ class FileSet(object):
                 self.add(arg)
 
     def __repr__(self):
-        return "<FileSet %s at %x>" % (self._dict.values(), id(self))
+        return "<FileSet %s at %x>" % (list(self._dict.values()), id(self))
 
     def add(self, fname):
         self._dict[fname.upper()] = fname
@@ -248,10 +241,10 @@ class FileSet(object):
         del self._dict[fname.upper()]
 
     def __contains__(self, fname):
-        return fname.upper() in self._dict.keys()
+        return fname.upper() in list(self._dict.keys())
 
     def __getitem__(self, index):
-        key = self._dict.keys()[index]
+        key = list(self._dict.keys())[index]
         return self._dict[key]
 
     def __len__(self):
@@ -300,7 +293,7 @@ def byte_compile(py_files, optimize=0, force=0,
         from distutils.util import execute, spawn
         script_name = mktemp(".py")
         if verbose:
-            print "writing byte-compilation script '%s'" % script_name
+            print("writing byte-compilation script '%s'" % script_name)
         if not dry_run:
             script = open(script_name, "w")
             script.write("""
@@ -354,7 +347,7 @@ byte_compile(files, optimize=%r, force=%r,
 
             if force or newer(mod.filename, cfile):
                 if verbose:
-                    print "byte-compiling %s to %s" % (mod.filename, dfile)
+                    print("byte-compiling %s to %s" % (mod.filename, dfile))
                 if not dry_run:
                     mkpath(os.path.dirname(cfile))
                     suffix = os.path.splitext(mod.filename)[1]
@@ -379,8 +372,8 @@ byte_compile(files, optimize=%r, force=%r,
                               ("Don't know how to handle %r" % mod.filename)
             else:
                 if verbose:
-                    print "skipping byte-compilation of %s to %s" % \
-                          (mod.filename, dfile)
+                    print("skipping byte-compilation of %s to %s" % \
+                          (mod.filename, dfile))
 
 SCMDIRS = ['CVS', '.svn']
 def skipscm(ofn):
@@ -473,8 +466,8 @@ def copy_tree(src, dst,
     (the default), the destination of the symlink will be copied.
     'update' and 'verbose' are the same as for 'copy_file'.
     """
-    assert isinstance(src, (str, unicode)), repr(src)
-    assert isinstance(dst, (str, unicode)), repr(dst)
+    assert isinstance(src, str), repr(src)
+    assert isinstance(dst, str), repr(dst)
 
 
     from distutils.dir_util import mkpath
@@ -490,16 +483,15 @@ def copy_tree(src, dst,
         condition = skipscm
 
     if not dry_run and not os_path_isdir(src):
-        raise DistutilsFileError, \
-              "cannot copy tree '%s': not a directory" % src
+        raise DistutilsFileError("cannot copy tree '%s': not a directory" % src)
     try:
         names = os_listdir(src)
-    except os.error, (errno, errstr):
+    except os.error as xxx_todo_changeme:
+        (errno, errstr) = xxx_todo_changeme.args
         if dry_run:
             names = []
         else:
-            raise DistutilsFileError, \
-                  "error listing files in '%s': %s" % (src, errstr)
+            raise DistutilsFileError("error listing files in '%s': %s" % (src, errstr))
 
     if not dry_run:
         mkpath(dst)

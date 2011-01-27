@@ -18,18 +18,14 @@ sys.path.append(_parent + '/site-packages.zip')
 sys.path.append(_parent + '/site-packages')
 
 import os
-try:
-    basestring
-except NameError:
-    basestring = str
 
 def makepath(*paths):
     dir = os.path.abspath(os.path.join(*paths))
     return dir, os.path.normcase(dir)
 
-for m in sys.modules.values():
+for m in list(sys.modules.values()):
     f = getattr(m, '__file__', None)
-    if isinstance(f, basestring) and os.path.exists(f):
+    if isinstance(f, str) and os.path.exists(f):
         m.__file__ = os.path.abspath(m.__file__)
 del m
 

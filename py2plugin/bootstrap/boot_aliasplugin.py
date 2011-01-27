@@ -5,4 +5,4 @@ def _run(scriptpath):
     site.addsitedir(os.environ['RESOURCEPATH'])
     sys.path.append(os.path.dirname(scriptpath))
     sys.argv[0] = __file__ = scriptpath
-    execfile(scriptpath, globals(), globals())
+    exec(compile(open(scriptpath).read(), scriptpath, 'exec'), globals(), globals())

@@ -372,23 +372,8 @@ int pyobjc_main(int argc, char * const *argv, char * const *envp) {
     LOOKUP(PyModule_AddObject);
     LOOKUP(PyModule_GetDict);
     LOOKUP(PyThreadState_Swap);
-    
-    /* PyBytes / PyString lookups depend of if we're on py3k or not */
-    PyBytes_AsStringPtr PyBytes_AsString = NULL;
-    PyBytes_FromStringPtr PyBytes_FromString = NULL;
-    LOOKUP_SYMBOL(PyBytes_AsString);
-    int isPy3k = tmpSymbol != NULL;
-    if (isPy3k) {
-        PyBytes_AsString = (PyBytes_AsStringPtr)NSAddressOfSymbol(tmpSymbol);
-        LOOKUP_SYMBOL(PyBytes_FromString);
-        PyBytes_FromString = (PyBytes_FromStringPtr)NSAddressOfSymbol(tmpSymbol);
-    }
-    else {
-        LOOKUP_SYMBOL(PyString_AsString);
-        PyBytes_AsString = (PyBytes_AsStringPtr)NSAddressOfSymbol(tmpSymbol);
-        LOOKUP_SYMBOL(PyString_FromString);
-        PyBytes_FromString = (PyBytes_FromStringPtr)NSAddressOfSymbol(tmpSymbol);
-    }
+    LOOKUP(PyBytes_AsString);
+    LOOKUP(PyBytes_FromString);
 
 #undef LOOKUP
 #undef LOOKUP_DEFINE
@@ -447,13 +432,7 @@ int pyobjc_main(int argc, char * const *argv, char * const *envp) {
         pythonProgramName = [[pythonProgramName stringByAppendingPathComponent:@"bin"] stringByAppendingPathComponent:pyExecutableName];
         
         wchar_t wPythonName[PATH_MAX+1];
-        if (isPy3k) {
-            mbstowcs(wPythonName, [pythonProgramName fileSystemRepresentation], PATH_MAX+1);
-        }
-        else {
-            const char *cPythonName = [pythonProgramName fileSystemRepresentation];
-            memcpy(wPythonName, cPythonName, strlen(cPythonName));
-        }
+        mbstowcs(wPythonName, [pythonProgramName fileSystemRepresentation], PATH_MAX+1);
         Py_SetProgramName(wPythonName);
     }
     
@@ -543,8 +522,7 @@ int pyobjc_main(int argc, char * const *argv, char * const *envp) {
         goto cleanup;
     }
     PyModule_AddStringConstant(module, "__file__", c_mainPyPath);
-    char * builtinsName = isPy3k ? "builtins" : "__builtin__";
-    PyObject *builtins = PyImport_ImportModule(builtinsName);
+    PyObject *builtins = PyImport_ImportModule("builtins");
     PyModule_AddObject(module, "__builtins__", builtins);
     PyObject *module_dict = PyModule_GetDict(module);
     if (PyErr_Occurred()) {

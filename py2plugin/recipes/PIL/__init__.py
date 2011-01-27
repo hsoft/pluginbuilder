@@ -1,11 +1,6 @@
-from py2plugin.util import imp_find_module
-import os, sys, glob
-from cStringIO import StringIO
-
-try:
-    set
-except NameError:
-    from sets import Set as set
+import os, sys
+from io import StringIO
+from modulegraph.util import imp_find_module
 
 def check(cmd, mf):
     m = mf.findNode('Image') or mf.findNode('PIL.Image')
@@ -15,7 +10,7 @@ def check(cmd, mf):
     plugins = set()
     visited = set()
     for folder in sys.path:
-        if not isinstance(folder, basestring):
+        if not isinstance(folder, str):
             continue
         folder = os.path.realpath(folder)
         if (not os.path.isdir(folder)) or (folder in visited):

@@ -8,6 +8,6 @@ def check(cmd, mf):
     RESOURCES = ['freesansbold.ttf', 'pygame_icon.tiff', 'pygame_icon.icns']
     return dict(
         loader_files = [
-            ('pygame', map(addpath, RESOURCES)),
+            ('pygame', list(map(addpath, RESOURCES))),
         ],
     )

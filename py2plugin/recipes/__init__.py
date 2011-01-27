@@ -1,11 +1,11 @@
-import PIL
-import pygame
-import pydoc
-import docutils
-import pyopengl
+from . import PIL
+from . import pygame
+from . import pydoc
+from . import docutils
+from . import pyopengl
 
-import numpy
-import scipy
-import matplotlib
+from . import numpy
+from . import scipy
+from . import matplotlib
 
-import virtualenv
+from . import virtualenv

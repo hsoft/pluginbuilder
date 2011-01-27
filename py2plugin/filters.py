@@ -1,9 +1,6 @@
-from pkg_resources import require
-require("macholib")
-
 import os
 import sys
-from macholib.util import has_filename_filter, in_system_path
+from macholib.util import in_system_path
 
 def not_stdlib_filter(module, prefix=None):
     """
