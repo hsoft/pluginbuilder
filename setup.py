@@ -6,8 +6,9 @@ except ImportError:
     import distribute_setup
     distribute_setup.use_setuptools()
 
-import sys, os
+import os
 import os.path
+from distutils.command.build_py import build_py as _build_py
 from setuptools import setup, find_packages
 from py2plugin import __version__
 
@@ -27,9 +28,14 @@ CLASSIFIERS = [
         'Topic :: Software Development :: Build Tools',
 ]
 
-if not os.path.exists('py2plugin/bundletemplate/prebuilt/main'):
-    print("Run py2plugin/bundletemplate first.")
-    sys.exit(1)
+class build_py(_build_py):
+    def run(self):
+        if not os.path.exists('py2plugin/bundletemplate/prebuilt/main'):
+            print("Pre-building plugin executable file")
+            import py2plugin.bundletemplate.setup
+            py2plugin.bundletemplate.setup.main()
+        _build_py.run(self)
+    
 
 setup(
     name='py2plugin',
@@ -57,4 +63,5 @@ setup(
         ],
     },
     zip_safe=False,
+    cmdclass={'build_py': build_py},
 )
