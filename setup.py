@@ -57,5 +57,4 @@ setup(
         ],
     },
     zip_safe=False,
-    test_suite='py2plugin_tests',
 )
