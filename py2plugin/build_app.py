@@ -20,12 +20,11 @@ import macholib.dyld
 import macholib.MachOStandalone
 from macholib.util import has_filename_filter
 
-import py2plugin.bundletemplate
-from py2plugin.util import (byte_compile, make_loader, copy_tree, strip_files, in_system_path,
+from . import bundletemplate, recipes
+from .util import (byte_compile, make_loader, copy_tree, strip_files, in_system_path,
     makedirs, iter_platform_files, skipscm, copy_file_data, os_path_isdir, copy_resource, SCMDIRS,
     mergecopy, mergetree, make_exec)
-from py2plugin.filters import not_stdlib_filter
-from py2plugin import recipes
+from .filters import not_stdlib_filter
 
 from distutils.sysconfig import get_config_var
 PYTHONFRAMEWORK=get_config_var('PYTHONFRAMEWORK')
@@ -235,7 +234,7 @@ def get_bootstrap_data(bootstrap):
         return open(bootstrap, 'rU').read()
 
 def create_pluginbundle(destdir, name, plist):
-    module = py2plugin.bundletemplate
+    module = bundletemplate
     kw = module.plist_template.infoPlistDict(
         plist.get('CFBundleExecutable', name), plist)
     plugin = os.path.join(destdir, kw['CFBundleName'] + '.plugin')

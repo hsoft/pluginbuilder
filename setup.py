@@ -9,6 +9,7 @@ except ImportError:
 import sys, os
 import os.path
 from setuptools import setup, find_packages
+from py2plugin import __version__
 
 LONG_DESCRIPTION = open('README.txt').read()
 
@@ -32,7 +33,7 @@ if not os.path.exists('py2plugin/bundletemplate/prebuilt/main'):
 
 setup(
     name='py2plugin',
-    version='0.1.0',
+    version=__version__,
     description='Create standalone Mac OS X plugins with Python',
     author='Virgil Dupras',
     author_email='hsoft@hardcoded.net',

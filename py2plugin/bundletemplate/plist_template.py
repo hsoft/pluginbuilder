@@ -1,6 +1,5 @@
 import sys
-import py2plugin
-__all__ = ['infoPlistDict']
+from .. import __version__
 
 def infoPlistDict(CFBundleExecutable, plist={}):
     CFBundleExecutable = str(CFBundleExecutable)
@@ -44,8 +43,5 @@ def infoPlistDict(CFBundleExecutable, plist={}):
         PythonShortVersion=str(sys.version[:3]),
         PythonExecutable=str(sys.executable),
     ))
-    py2pluginInfo = pythonInfo.setdefault('py2plugin', {}).update(dict(
-        version=str(py2plugin.__version__),
-        template='bundle',
-    ))
+    pythonInfo.setdefault('py2plugin', {}).update(dict(version=__version__))
     return pdict
