@@ -354,6 +354,163 @@ class PluginBuilder:
     def __init__(self, folders, opts):
         self.folders = folders
         self.opts = opts
+        self.runtime_preferences = list(self.get_runtime_preferences())
+    
+    def get_default_plist(self):
+        plist = {}
+        target = self.opts.target
+
+        version = self.opts.distribution.get_version()
+        plist['CFBundleVersion'] = version
+
+        name = self.opts.distribution.get_name()
+        if name == 'UNKNOWN':
+            base = target.get_dest_base()
+            name = os.path.basename(base)
+        plist['CFBundleName'] = name
+
+        return plist
+    
+    def get_plist_options(self):
+        return dict(
+            PyOptions=dict(
+                use_pythonpath=bool(self.opts.use_pythonpath),
+                site_packages=bool(self.opts.site_packages),
+                alias=bool(self.opts.alias),
+                optimize=self.opts.optimize,
+            ),
+        )
+    
+    def initialize_plist(self):
+        plist = self.get_default_plist()
+        plist.update(self.opts.target.plist)
+        plist.update(self.opts.plist)
+        plist.update(self.get_plist_options())
+
+        if self.opts.iconfile:
+            iconfile = self.opts.iconfile
+            if not os.path.exists(iconfile):
+                iconfile = iconfile + '.icns'
+            if not os.path.exists(iconfile):
+                raise DistutilsOptionError("icon file must exist: %r"
+                    % (self.opts.iconfile,))
+            self.opts.resources.append(iconfile)
+            plist['CFBundleIconFile'] = os.path.basename(iconfile)
+        self.opts.plist = plist
+        return plist
+    
+    def get_runtime(self, prefix=None, version=None):
+        # XXX - this is a bit of a hack!
+        #       ideally we'd use dylib functions to figure this out
+        if prefix is None:
+            prefix = sys.prefix
+        if version is None:
+            version = sys.version
+        version = version[:3]
+        info = None
+        if os.path.exists(os.path.join(prefix, ".Python")):
+            # We're in a virtualenv environment, locate the real prefix
+            fn = os.path.join(prefix, "lib", "python%d.%d"%(sys.version_info[:2]), "orig-prefix.txt")
+            if os.path.exists(fn):
+                prefix = open(fn, 'rU').read().strip()
+
+        try:
+            fmwk = macholib.dyld.framework_find(prefix)
+        except ValueError:
+            info = None
+        else:
+            info = macholib.dyld.framework_info(fmwk)
+
+        if info is not None:
+            dylib = info['name']
+            runtime = os.path.join(info['location'], info['name'])
+        else:
+            dylib = 'libpython%s.dylib' % (sys.version[:3],)
+            runtime = os.path.join(prefix, 'lib', dylib)
+        return dylib, runtime
+    
+    def get_runtime_preferences(self, prefix=None, version=None):
+        dylib, runtime = self.get_runtime(prefix=prefix, version=version)
+        yield os.path.join('@executable_path', '..', 'Frameworks', dylib)
+        if self.opts.semi_standalone or self.opts.alias:
+            yield runtime
+    
+    def initialize_prescripts(self):
+        prescripts = []
+        if self.opts.site_packages or self.opts.alias:
+            prescripts.append('site_packages')
+
+        if self.opts.argv_inject is not None:
+            prescripts.append('argv_inject')
+            prescripts.append(
+                StringIO('_argv_inject(%r)\n' % (self.opts.argv_inject,)))
+
+        if not self.opts.alias:
+            prescripts.append('disable_linecache')
+            prescripts.append('boot_plugin')
+        else:
+            if self.opts.additional_paths:
+                prescripts.append('path_inject')
+                prescripts.append(
+                    StringIO('_path_inject(%r)\n' % (self.opts.additional_paths,)))
+            prescripts.append('boot_aliasplugin')
+        newprescripts = []
+        for s in prescripts:
+            if isinstance(s, str):
+                newprescripts.append(get_bootstrap('py2plugin.bootstrap.' + s))
+            else:
+                newprescripts.append(s)
+
+        prescripts = self.opts.target.prescripts
+        self.opts.target.prescripts = newprescripts + prescripts
+    
+    def fixup_distribution(self):
+        dist = self.opts.distribution
+
+        # Trying to obtain plugin from dist for backward compatibility
+        # reasons.
+        plugin = dist.plugin
+        # If we can get suitable value from self.plugin, we prefer it.
+        if self.opts.plugin is not None:
+            plugin = self.opts.plugin
+
+        # Convert our args into target objects.
+        self.opts.target = Target(plugin[0])
+
+        # also the directory where the pythonXX.dylib must reside
+        app_dir = os.path.dirname(self.opts.target.get_dest_base())
+        if os.path.isabs(app_dir):
+            raise DistutilsOptionError(
+                  "app directory must be relative: %s" % (app_dir,))
+        app_dir = os.path.join(self.folders.dist_dir, app_dir)
+        mkpath(app_dir)
+    
+    def process_recipes(self, mf, filters, flatpackages, loader_files):
+        rdict = dict(iterRecipes())
+        while True:
+            for name, check in rdict.items():
+                rval = check(None, mf) # the 'cmd arg is used in no receipt, it should be removed.
+                if rval is None:
+                    continue
+                # we can pull this off so long as we stop the iter
+                del rdict[name]
+                print('*** using recipe: %s ***' % (name,))
+                self.opts.packages.update(rval.get('packages', ()))
+                for pkg in rval.get('flatpackages', ()):
+                    if isinstance(pkg, str):
+                        pkg = (os.path.basename(pkg), pkg)
+                    flatpackages[pkg[0]] = pkg[1]
+                filters.extend(rval.get('filters', ()))
+                loader_files.extend(rval.get('loader_files', ()))
+                newbootstraps = list(map(get_bootstrap, rval.get('prescripts', ())))
+
+                for fn in newbootstraps:
+                    if isinstance(fn, str):
+                        mf.run_script(fn)
+                self.opts.target.prescripts.extend(newbootstraps)
+                break
+            else:
+                break
     
     def iter_data_files(self):
         dist = self.opts.distribution
@@ -365,9 +522,8 @@ class PluginBuilder:
     def build_executable(self, target, pkgexts, copyexts, script):
         # Build an executable for the target
         appdir, resdir, plist = create_bundle(target, script, self.folders.dist_dir, self.opts.plist,
-            self.opts.runtime_preferences)
-        self.opts.appdir = appdir
-        self.opts.resdir = resdir
+            self.runtime_preferences)
+        self.appdir = appdir
         self.opts.plist = plist
 
         for src, dest in self.iter_data_files():
@@ -432,7 +588,7 @@ class PluginBuilder:
     
     def build_alias_executable(self, target, script):
         # Build an alias executable for the target
-        appdir, resdir, plist = create_bundle(target, script, self.folders.dist_dir, self.opts.plist, self.opts.runtime_preferences)
+        appdir, resdir, plist = create_bundle(target, script, self.folders.dist_dir, self.opts.plist, self.runtime_preferences)
 
         # symlink python executable
         execdst = os.path.join(appdir, 'Contents', 'MacOS', 'python')
@@ -461,8 +617,7 @@ class PluginBuilder:
 
         # symlink frameworks
         for src in iter_frameworks(self.opts.frameworks):
-            dest = os.path.join(
-                appdir, 'Contents', 'Frameworks', os.path.basename(src))
+            dest = os.path.join(appdir, 'Contents', 'Frameworks', os.path.basename(src))
             if src == dest:
                 continue
             makedirs(os.path.dirname(dest))
@@ -482,6 +637,118 @@ class PluginBuilder:
         target.appdir = appdir
         return appdir
     
+    def create_binaries(self, py_files, pkgdirs, extensions, loader_files):
+        print("*** create binaries ***")
+        pkgexts = []
+        copyexts = []
+        extmap = {}
+        def packagefilter(mod, pkgdirs=pkgdirs):
+            fn = os.path.realpath(getattr(mod, 'filename', None))
+            if fn is None:
+                return None
+            for pkgdir in pkgdirs:
+                if fn.startswith(pkgdir):
+                    return None
+            return fn
+        if pkgdirs:
+            py_files = list(filter(packagefilter, py_files))
+        for ext in extensions:
+            fn = packagefilter(ext)
+            if fn is None:
+                fn = os.path.realpath(getattr(ext, 'filename', None))
+                pkgexts.append(ext)
+            else:
+                if '.' in ext.identifier:
+                    py_files.append(create_loader(ext, self.folders.temp_dir, self.opts.verbose, self.opts.dry_run))
+                copyexts.append(ext)
+            extmap[fn] = ext
+
+        # byte compile the python modules into the target directory
+        print("*** byte compile python files ***")
+        byte_compile(py_files,
+                     target_dir=self.folders.collect_dir,
+                     optimize=self.opts.optimize,
+                     force=True,
+                     verbose=self.opts.verbose,
+                     dry_run=self.opts.dry_run)
+
+        for item in py_files:
+            if not isinstance(item, Package): continue
+            copy_package_data(item, self.folders.collect_dir)
+
+        for path, files in loader_files:
+            dest = os.path.join(self.folders.collect_dir, path)
+            mkpath(dest)
+            for fn in files:
+                destfn = os.path.join(dest, os.path.basename(fn))
+                if os.path.isdir(fn):
+                    copy_tree(fn, destfn, preserve_symlinks=False)
+                else:
+                    copy_file(fn, destfn)
+
+        # build the executables
+        target = self.opts.target
+        dst = self.build_executable(target, pkgexts, copyexts, target.script)
+        exp = os.path.join(dst, 'Contents', 'MacOS')
+        execdst = os.path.join(exp, 'python')
+        if self.opts.semi_standalone:
+            force_symlink(sys.executable, execdst)
+        else:
+            if os.path.exists(os.path.join(sys.prefix, ".Python")):
+                fn = os.path.join(sys.prefix, "lib", "python%d.%d"%(sys.version_info[:2]), "orig-prefix.txt")
+                if os.path.exists(fn):
+                    prefix = open(fn, 'rU').read().strip()
+
+                rest_path = sys.executable[len(sys.prefix)+1:]
+                if rest_path.startswith('.'):
+                    rest_path = rest_path[1:]
+
+                print("XXXX", os.path.join(prefix, rest_path))
+                copy_file(os.path.join(prefix, rest_path), execdst)
+
+            else:
+                copy_file(sys.executable, execdst)
+        if not self.opts.debug_skip_macholib:
+            mm = PythonStandalone(dst, executable_path=exp)
+            dylib, runtime = self.get_runtime()
+            if self.opts.semi_standalone:
+                mm.excludes.append(runtime)
+            else:
+                mm.mm.run_file(runtime)
+            for exclude in self.opts.dylib_excludes:
+                info = macholib.dyld.framework_info(exclude)
+                if info is not None:
+                    exclude = os.path.join(
+                        info['location'], info['shortname'] + '.framework')
+                mm.excludes.append(exclude)
+            for fmwk in self.opts.frameworks:
+                mm.mm.run_file(fmwk)
+            platfiles = mm.run()
+            if not self.opts.no_strip and not self.opts.dry_run:
+                platfiles = strip_dsym(platfiles, self.appdir)
+                strip_files_and_report(platfiles, self.opts.verbose)
+    
+    def run_alias(self):
+        self.build_alias_executable(self.opts.target, self.opts.target.script)
+    
+    def run_normal(self):
+        debug = 4 if self.opts.debug_modulegraph else 0
+        mf = find_modules(scripts=collect_scripts(self.opts.target), includes=self.opts.includes,
+            packages=self.opts.packages, excludes=self.opts.excludes, debug=debug)
+        filters = collect_filters(self.opts.filters)
+        flatpackages = {}
+        loader_files = []
+        self.process_recipes(mf, filters, flatpackages, loader_files)
+
+        if self.opts.debug_modulegraph:
+            import pdb
+            pdb.Pdb().set_trace()
+
+        filter_dependencies(mf, filters)
+
+        py_files, extensions = finalize_modulefinder(mf, self.folders.temp_dir)
+        pkgdirs = collect_packagedirs(self.opts.packages)
+        self.create_binaries(py_files, pkgdirs, extensions, loader_files)
 
 class py2plugin(Command):
     description = "create a Mac OS X application or plugin from Python scripts"
@@ -620,69 +887,15 @@ class py2plugin(Command):
                 'Contents', 'Resources', 'PythonApplet.icns')
             if os.path.exists(iconfile):
                 self.iconfile = iconfile
-
-        self.runtime_preferences = list(self.get_runtime_preferences())
-
-
-    def get_default_plist(self):
-        plist = {}
-        target = self.target
-
-        version = self.distribution.get_version()
-        plist['CFBundleVersion'] = version
-
-        name = self.distribution.get_name()
-        if name == 'UNKNOWN':
-            base = target.get_dest_base()
-            name = os.path.basename(base)
-        plist['CFBundleName'] = name
-
-        return plist
-
-    def get_runtime(self, prefix=None, version=None):
-        # XXX - this is a bit of a hack!
-        #       ideally we'd use dylib functions to figure this out
-        if prefix is None:
-            prefix = sys.prefix
-        if version is None:
-            version = sys.version
-        version = version[:3]
-        info = None
-        if os.path.exists(os.path.join(prefix, ".Python")):
-            # We're in a virtualenv environment, locate the real prefix
-            fn = os.path.join(prefix, "lib", "python%d.%d"%(sys.version_info[:2]), "orig-prefix.txt")
-            if os.path.exists(fn):
-                prefix = open(fn, 'rU').read().strip()
-
-        try:
-            fmwk = macholib.dyld.framework_find(prefix)
-        except ValueError:
-            info = None
-        else:
-            info = macholib.dyld.framework_info(fmwk)
-
-        if info is not None:
-            dylib = info['name']
-            runtime = os.path.join(info['location'], info['name'])
-        else:
-            dylib = 'libpython%s.dylib' % (sys.version[:3],)
-            runtime = os.path.join(prefix, 'lib', dylib)
-        return dylib, runtime
     
-    def get_runtime_preferences(self, prefix=None, version=None):
-        dylib, runtime = self.get_runtime(prefix=prefix, version=version)
-        yield os.path.join('@executable_path', '..', 'Frameworks', dylib)
-        if self.semi_standalone or self.alias:
-            yield runtime
-
     def run(self):
         build = self.reinitialize_command('build')
         build.build_base = self.bdist_base
         build.run()
         self.folders = Folders(self.dist_dir, self.bdist_base, self.semi_standalone)
         self.builder = PluginBuilder(self.folders, self)
-        self.fixup_distribution()
-        self.initialize_plist()
+        self.builder.fixup_distribution()
+        self.builder.initialize_plist()
 
         sys_old_path = sys.path[:]
         extra_paths = [os.path.dirname(self.target.script)]
@@ -691,239 +904,13 @@ class py2plugin(Command):
         sys.path[:0] = self.additional_paths
 
         # this needs additional_paths
-        self.initialize_prescripts()
+        self.builder.initialize_prescripts()
 
         try:
             if self.alias:
-                self.run_alias()
+                self.builder.run_alias()
             else:
-                self.run_normal()
+                self.builder.run_normal()
         finally:
             sys.path = sys_old_path
-
-    
-    def get_plist_options(self):
-        return dict(
-            PyOptions=dict(
-                use_pythonpath=bool(self.use_pythonpath),
-                site_packages=bool(self.site_packages),
-                alias=bool(self.alias),
-                optimize=self.optimize,
-            ),
-        )
-
-    
-    def initialize_plist(self):
-        plist = self.get_default_plist()
-        plist.update(self.target.plist)
-        plist.update(self.plist)
-        plist.update(self.get_plist_options())
-
-        if self.iconfile:
-            iconfile = self.iconfile
-            if not os.path.exists(iconfile):
-                iconfile = iconfile + '.icns'
-            if not os.path.exists(iconfile):
-                raise DistutilsOptionError("icon file must exist: %r"
-                    % (self.iconfile,))
-            self.resources.append(iconfile)
-            plist['CFBundleIconFile'] = os.path.basename(iconfile)
-        self.plist = plist
-        return plist
-
-    def run_alias(self):
-        self.app_files = []
-        dst = self.build_alias_executable(self.target, self.target.script)
-        self.app_files.append(dst)
-    
-    def process_recipes(self, mf, filters, flatpackages, loader_files):
-        rdict = dict(iterRecipes())
-        while True:
-            for name, check in rdict.items():
-                rval = check(self, mf)
-                if rval is None:
-                    continue
-                # we can pull this off so long as we stop the iter
-                del rdict[name]
-                print('*** using recipe: %s ***' % (name,))
-                self.packages.update(rval.get('packages', ()))
-                for pkg in rval.get('flatpackages', ()):
-                    if isinstance(pkg, str):
-                        pkg = (os.path.basename(pkg), pkg)
-                    flatpackages[pkg[0]] = pkg[1]
-                filters.extend(rval.get('filters', ()))
-                loader_files.extend(rval.get('loader_files', ()))
-                newbootstraps = list(map(get_bootstrap, rval.get('prescripts', ())))
-
-                for fn in newbootstraps:
-                    if isinstance(fn, str):
-                        mf.run_script(fn)
-                self.target.prescripts.extend(newbootstraps)
-                break
-            else:
-                break
-    
-    def run_normal(self):
-        debug = 4 if self.debug_modulegraph else 0
-        mf = find_modules(scripts=collect_scripts(self.target), includes=self.includes,
-            packages=self.packages, excludes=self.excludes, debug=debug)
-        filters = collect_filters(self.filters)
-        flatpackages = {}
-        loader_files = []
-        self.process_recipes(mf, filters, flatpackages, loader_files)
-
-        if self.debug_modulegraph:
-            import pdb
-            pdb.Pdb().set_trace()
-
-        filter_dependencies(mf, filters)
-
-        py_files, extensions = finalize_modulefinder(mf, self.folders.temp_dir)
-        pkgdirs = collect_packagedirs(self.packages)
-        self.create_binaries(py_files, pkgdirs, extensions, loader_files)
-    
-    def create_binaries(self, py_files, pkgdirs, extensions, loader_files):
-        print("*** create binaries ***")
-        pkgexts = []
-        copyexts = []
-        extmap = {}
-        def packagefilter(mod, pkgdirs=pkgdirs):
-            fn = os.path.realpath(getattr(mod, 'filename', None))
-            if fn is None:
-                return None
-            for pkgdir in pkgdirs:
-                if fn.startswith(pkgdir):
-                    return None
-            return fn
-        if pkgdirs:
-            py_files = list(filter(packagefilter, py_files))
-        for ext in extensions:
-            fn = packagefilter(ext)
-            if fn is None:
-                fn = os.path.realpath(getattr(ext, 'filename', None))
-                pkgexts.append(ext)
-            else:
-                if '.' in ext.identifier:
-                    py_files.append(create_loader(ext, self.folders.temp_dir, self.verbose, self.dry_run))
-                copyexts.append(ext)
-            extmap[fn] = ext
-
-        # byte compile the python modules into the target directory
-        print("*** byte compile python files ***")
-        byte_compile(py_files,
-                     target_dir=self.folders.collect_dir,
-                     optimize=self.optimize,
-                     force=True,
-                     verbose=self.verbose,
-                     dry_run=self.dry_run)
-
-        for item in py_files:
-            if not isinstance(item, Package): continue
-            copy_package_data(item, self.folders.collect_dir)
-
-        self.lib_files = []
-        self.app_files = []
-
-        for path, files in loader_files:
-            dest = os.path.join(self.folders.collect_dir, path)
-            self.mkpath(dest)
-            for fn in files:
-                destfn = os.path.join(dest, os.path.basename(fn))
-                if os.path.isdir(fn):
-                    copy_tree(fn, destfn, preserve_symlinks=False)
-                else:
-                    self.copy_file(fn, destfn)
-
-        # build the executables
-        target = self.target
-        dst = self.builder.build_executable(target, pkgexts, copyexts, target.script)
-        exp = os.path.join(dst, 'Contents', 'MacOS')
-        execdst = os.path.join(exp, 'python')
-        if self.semi_standalone:
-            force_symlink(sys.executable, execdst)
-        else:
-            if os.path.exists(os.path.join(sys.prefix, ".Python")):
-                fn = os.path.join(sys.prefix, "lib", "python%d.%d"%(sys.version_info[:2]), "orig-prefix.txt")
-                if os.path.exists(fn):
-                    prefix = open(fn, 'rU').read().strip()
-
-                rest_path = sys.executable[len(sys.prefix)+1:]
-                if rest_path.startswith('.'):
-                    rest_path = rest_path[1:]
-
-                print("XXXX", os.path.join(prefix, rest_path))
-                self.copy_file(os.path.join(prefix, rest_path), execdst)
-
-            else:
-                self.copy_file(sys.executable, execdst)
-        if not self.debug_skip_macholib:
-            mm = PythonStandalone(dst, executable_path=exp)
-            dylib, runtime = self.get_runtime()
-            if self.semi_standalone:
-                mm.excludes.append(runtime)
-            else:
-                mm.mm.run_file(runtime)
-            for exclude in self.dylib_excludes:
-                info = macholib.dyld.framework_info(exclude)
-                if info is not None:
-                    exclude = os.path.join(
-                        info['location'], info['shortname'] + '.framework')
-                mm.excludes.append(exclude)
-            for fmwk in self.frameworks:
-                mm.mm.run_file(fmwk)
-            platfiles = mm.run()
-            if not self.no_strip and not self.dry_run:
-                platfiles = strip_dsym(platfiles, self.appdir)
-                strip_files_and_report(platfiles, self.verbose)
-            self.app_files.append(dst)
-    
-    def fixup_distribution(self):
-        dist = self.distribution
-
-        # Trying to obtain plugin from dist for backward compatibility
-        # reasons.
-        plugin = dist.plugin
-        # If we can get suitable value from self.plugin, we prefer it.
-        if self.plugin is not None:
-            plugin = self.plugin
-
-        # Convert our args into target objects.
-        self.target = Target(plugin[0])
-
-        # also the directory where the pythonXX.dylib must reside
-        app_dir = os.path.dirname(self.target.get_dest_base())
-        if os.path.isabs(app_dir):
-            raise DistutilsOptionError(
-                  "app directory must be relative: %s" % (app_dir,))
-        self.app_dir = os.path.join(self.folders.dist_dir, app_dir)
-        self.mkpath(self.app_dir)
-
-    def initialize_prescripts(self):
-        prescripts = []
-        if self.site_packages or self.alias:
-            prescripts.append('site_packages')
-
-        if self.argv_inject is not None:
-            prescripts.append('argv_inject')
-            prescripts.append(
-                StringIO('_argv_inject(%r)\n' % (self.argv_inject,)))
-
-        if not self.alias:
-            prescripts.append('disable_linecache')
-            prescripts.append('boot_plugin')
-        else:
-            if self.additional_paths:
-                prescripts.append('path_inject')
-                prescripts.append(
-                    StringIO('_path_inject(%r)\n' % (self.additional_paths,)))
-            prescripts.append('boot_aliasplugin')
-        newprescripts = []
-        for s in prescripts:
-            if isinstance(s, str):
-                newprescripts.append(get_bootstrap('py2plugin.bootstrap.' + s))
-            else:
-                newprescripts.append(s)
-
-        prescripts = self.target.prescripts
-        self.target.prescripts = newprescripts + prescripts
     
