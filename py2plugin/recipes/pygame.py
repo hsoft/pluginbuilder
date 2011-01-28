@@ -1,5 +1,5 @@
 import os
-def check(cmd, mf):
+def check(mf):
     m = mf.findNode('pygame')
     if m is None or m.filename is None:
         return None

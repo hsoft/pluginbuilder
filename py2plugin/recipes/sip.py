@@ -6,7 +6,7 @@ This will include all C modules that might be used when you import a package
 using sip because we have no way to fine-tune this.
 """
 
-class Sip(object):
+class Sip:
     def __init__(self):
         self.packages = None
         self.warn = None
@@ -17,17 +17,12 @@ class Sip(object):
 
         import sipconfig, os
 
-        ##old version for PyQt/Qt 3
-        # cfg = sipconfig.Configuration()
-        # qtdir = cfg.qt_lib_dir
-
-        ##new version for PyQt 4
         from PyQt4 import pyqtconfig
         cfg = pyqtconfig.Configuration()
         qtdir = cfg.qt_lib_dir
         if not os.path.exists(qtdir):
             # half-broken installation? ignore.
-            raise ImportError
+            raise ImportError()
 
         # Qt is GHETTO!
         dyld_library_path = os.environ.get('DYLD_LIBRARY_PATH', '').split(':')
@@ -45,7 +40,7 @@ class Sip(object):
         self.warn = cfg.qt_edition == 'free'
         return self.packages
 
-    def check(self, cmd, mf):
+    def check(self, mf):
         try:
             packages = self.config()
         except ImportError:

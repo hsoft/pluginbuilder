@@ -1,4 +1,4 @@
-def check(cmd, mf):
+def check(mf):
     name = 'cjkcodecs'
     m = mf.findNode(name)
     if m is None or m.filename is None:

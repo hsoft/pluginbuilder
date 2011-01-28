@@ -1,4 +1,4 @@
-def check(cmd, mf):
+def check(mf):
     m = mf.findNode('scipy')
     if m is None or m.filename is None:
         return None

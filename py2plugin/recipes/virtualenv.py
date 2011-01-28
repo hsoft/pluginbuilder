@@ -7,8 +7,7 @@ This recipe is rather compilicated and definitely not a
 good model for other recipes!!!
 """
 import sys, os, imp
-from modulegraph.modulegraph import MissingModule, \
-        Package, SourceModule, CompiledModule, find_module
+from modulegraph.modulegraph import MissingModule, Package, SourceModule, CompiledModule, find_module
 
 def retry_import(mf, m):
     """
@@ -56,7 +55,7 @@ def retry_import(mf, m):
     return m
 
 
-def check(cmd, mf):
+def check(mf):
     m = mf.findNode('distutils')
     if m is None or m.filename is None:
         return None

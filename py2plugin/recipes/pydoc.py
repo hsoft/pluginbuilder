@@ -1,5 +1,5 @@
 import sys
-def check(cmd, mf):
+def check(mf):
     m = mf.findNode('pydoc')
     if m is None or m.filename is None:
         return None

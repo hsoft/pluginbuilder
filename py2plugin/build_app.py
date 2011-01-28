@@ -10,7 +10,7 @@ from distutils.util import convert_path
 from distutils.dir_util import mkpath
 from distutils.file_util import copy_file
 from distutils import log
-from distutils.errors import DistutilsOptionError
+from pkg_resources import resource_filename
 
 from modulegraph.find_modules import find_modules, parse_mf_results
 from modulegraph.modulegraph import SourceModule, Package, os_listdir
@@ -20,9 +20,10 @@ import macholib.dyld
 import macholib.MachOStandalone
 from macholib.util import has_filename_filter
 
-from py2plugin.create_pluginbundle import create_pluginbundle
+import py2plugin.bundletemplate
 from py2plugin.util import (byte_compile, make_loader, copy_tree, strip_files, in_system_path,
-    makedirs, iter_platform_files, skipscm, copy_file_data, os_path_isdir, copy_resource, SCMDIRS)
+    makedirs, iter_platform_files, skipscm, copy_file_data, os_path_isdir, copy_resource, SCMDIRS,
+    mergecopy, mergetree, make_exec)
 from py2plugin.filters import not_stdlib_filter
 from py2plugin import recipes
 
@@ -39,14 +40,6 @@ class PythonStandalone(macholib.MachOStandalone.MachOStandalone):
         dest = os.path.join(self.dest, info['shortname'] + '.framework')
         self.pending.append((destfn, iter_platform_files(dest)))
         return destfn
-
-def iterRecipes(module=recipes):
-    for name in dir(module):
-        if name.startswith('_'):
-            continue
-        check = getattr(getattr(module, name), 'check', None)
-        if check is not None:
-            yield (name, check)
 
 class Target:
     def __init__(self, script):
@@ -83,29 +76,6 @@ def force_symlink(src, dst):
     except OSError:
         pass
     os.symlink(src, dst)
-
-def create_loader(item, temp_dir, verbose, dry_run):
-    # Hm, how to avoid needless recreation of this file?
-    slashname = item.identifier.replace('.', os.sep)
-    pathname = os.path.join(temp_dir, "%s.py" % slashname)
-    if os.path.exists(pathname):
-        if verbose:
-            print(("skipping python loader for extension %r"
-                % (item.identifier,)))
-    else:
-        mkpath(os.path.dirname(pathname))
-        # and what about dry_run?
-        if verbose:
-            print(("creating python loader for extension %r"
-                % (item.identifier,)))
-
-        fname = slashname + os.path.splitext(item.filename)[1]
-        source = make_loader(fname)
-        if not dry_run:
-            open(pathname, "w").write(source)
-        else:
-            return
-    return SourceModule(item.identifier, pathname)
 
 def copy_python_framework(info, dst):
     # XXX - In this particular case we know exactly what we can
@@ -264,87 +234,39 @@ def get_bootstrap_data(bootstrap):
     else:
         return open(bootstrap, 'rU').read()
 
-def create_bundle(target, script, dist_dir, plist, runtime_preferences=None):
-    base = target.get_dest_base()
-    appdir = os.path.join(dist_dir, os.path.dirname(base))
-    appname = plist['CFBundleName']
-    print("*** creating plugin bundle: %s ***" % (appname,))
-    if runtime_preferences:
-        plist.setdefault('PyRuntimeLocations', runtime_preferences)
-    appdir, plist = create_pluginbundle(appdir, appname, plist=plist)
-    resdir = os.path.join(appdir, 'Contents', 'Resources')
-    return appdir, resdir, plist
-
-def iter_frameworks(frameworks):
-    for fn in frameworks:
-        fmwk = macholib.dyld.framework_info(fn)
-        if fmwk is None:
-            yield fn
-        else:
-            basename = fmwk['shortname'] + '.framework'
-            yield os.path.join(fmwk['location'], basename)
-
-def collect_packagedirs(packages):
-    return list(filter(os.path.exists, [
-        os.path.join(os.path.realpath(get_bootstrap(pkg)), '')
-        for pkg in packages
-    ]))
-
-def collect_scripts(target):
-    # these contains file names
-    scripts = {target.script,}
-    scripts.update(k for k in target.prescripts if isinstance(k, str))
-    return scripts
-
-def collect_filters(filters):
-    return [has_filename_filter] + list(filters)
-
-def finalize_modulefinder(mf, temp_dir):
-    for item in mf.flatten():
-        if isinstance(item, Package) and item.filename == '-':
-            fn = os.path.join(temp_dir, 'empty_package', '__init__.py')
-            if not os.path.exists(fn):
-                dn = os.path.dirname(fn)
-                if not os.path.exists(dn):
-                    os.makedirs(dn)
-                fp = open(fn, 'w')
-                fp.close()
-
-            item.filename = fn
-
-    py_files, extensions = parse_mf_results(mf)
-    py_files = list(py_files)
-    extensions = list(extensions)
-    return py_files, extensions
-
-def filter_dependencies(mf, filters):
-    print("*** filtering dependencies ***")
-    nodes_seen, nodes_removed, nodes_orphaned = mf.filterStack(filters)
-    print('%d total' % (nodes_seen,))
-    print('%d filtered' % (nodes_removed,))
-    print('%d orphaned' % (nodes_orphaned,))
-    print('%d remaining' % (nodes_seen - nodes_removed,))
-
-class Folders:
-    def __init__(self, dist_dir, bdist_base, semi_standalone):
-        bdistdir_fmt = 'python%s-semi_standalone' if semi_standalone else 'python%s-standalone'
-        self.bdist_dir = os.path.join(bdist_base, bdistdir_fmt % (sys.version[:3],), 'app')
-        
-        self.collect_dir = os.path.abspath(os.path.join(self.bdist_dir, "collect"))
-        mkpath(self.collect_dir)
-        
-        self.temp_dir = os.path.abspath(os.path.join(self.bdist_dir, "temp"))
-        mkpath(self.temp_dir)
-        
-        self.dist_dir = os.path.abspath(dist_dir)
-        mkpath(self.dist_dir)
-        
-        self.ext_dir = os.path.join(self.bdist_dir, 'lib-dynload')
-        mkpath(self.ext_dir)
-        
-        self.framework_dir = os.path.join(self.bdist_dir, 'Frameworks')
-        mkpath(self.framework_dir)
-    
+def create_pluginbundle(destdir, name, plist):
+    module = py2plugin.bundletemplate
+    kw = module.plist_template.infoPlistDict(
+        plist.get('CFBundleExecutable', name), plist)
+    plugin = os.path.join(destdir, kw['CFBundleName'] + '.plugin')
+    contents = os.path.join(plugin, 'Contents')
+    resources = os.path.join(contents, 'Resources')
+    platdir = os.path.join(contents, 'MacOS')
+    dirs = [contents, resources, platdir]
+    plist = plistlib.Plist()
+    plist.update(kw)
+    plistPath = os.path.join(contents, 'Info.plist')
+    if os.path.exists(plistPath):
+        if plist != plistlib.Plist.fromFile(plistPath):
+            for d in dirs:
+                shutil.rmtree(d, ignore_errors=True)
+    for d in dirs:
+        makedirs(d)
+    plist.write(plistPath)
+    srcmain = module.setup.main_executable_path()
+    destmain = os.path.join(platdir, kw['CFBundleExecutable'])
+    open(os.path.join(contents, 'PkgInfo'), 'w').write(
+        kw['CFBundlePackageType'] + kw['CFBundleSignature']
+    )
+    mergecopy(srcmain, destmain)
+    make_exec(destmain)
+    mergetree(
+        resource_filename(module.__name__, 'lib'),
+        resources,
+        condition=skipscm,
+        copyfn=mergecopy,
+    )
+    return plugin, plist
 
 class Options:
     def __init__(self, main_script_path, includes=None, packages=None, excludes=None, dylib_excludes=None,
@@ -352,7 +274,7 @@ class Options:
             alias=False, argv_inject=None, use_pythonpath=False, site_package=False, verbose=False,
             dry_run=False, bdist_base='build', dist_dir='dist', debug_modulegraph=False, 
             debug_skip_macholib=False):
-        self.plugin = main_script_path
+        self.target = Target(main_script_path)
         self.bdist_base = bdist_base
         self.optimize = optimize
         self.strip = strip
@@ -414,12 +336,41 @@ class Options:
                 self.iconfile = iconfile
     
 
+class Folders:
+    def __init__(self, opts):
+        bdistdir_fmt = 'python%s-semi_standalone' if opts.semi_standalone else 'python%s-standalone'
+        self.bdist_dir = os.path.join(opts.bdist_base, bdistdir_fmt % (sys.version[:3],), 'app')
+        
+        self.collect_dir = os.path.abspath(os.path.join(self.bdist_dir, "collect"))
+        mkpath(self.collect_dir)
+        
+        self.temp_dir = os.path.abspath(os.path.join(self.bdist_dir, "temp"))
+        mkpath(self.temp_dir)
+        
+        self.dist_dir = os.path.abspath(opts.dist_dir)
+        mkpath(self.dist_dir)
+        
+        self.ext_dir = os.path.join(self.bdist_dir, 'lib-dynload')
+        mkpath(self.ext_dir)
+        
+        self.framework_dir = os.path.join(self.bdist_dir, 'Frameworks')
+        mkpath(self.framework_dir)
+        
+        # also the directory where the pythonXX.dylib must reside
+        app_dir = os.path.dirname(opts.target.get_dest_base())
+        if os.path.isabs(app_dir):
+            raise Exception("app directory must be relative: %s" % (app_dir,))
+        app_dir = os.path.join(self.dist_dir, app_dir)
+        mkpath(app_dir)
+    
+
 class PluginBuilder:
     def __init__(self, folders, opts):
         self.folders = folders
         self.opts = opts
         self.runtime_preferences = list(self.get_runtime_preferences())
     
+    #--- Plist
     def get_default_plist(self):
         plist = {}
         target = self.opts.target
@@ -456,13 +407,13 @@ class PluginBuilder:
             if not os.path.exists(iconfile):
                 iconfile = iconfile + '.icns'
             if not os.path.exists(iconfile):
-                raise DistutilsOptionError("icon file must exist: %r"
-                    % (self.opts.iconfile,))
+                raise Exception("icon file must exist: %r" % (self.opts.iconfile,))
             self.opts.resources.append(iconfile)
             plist['CFBundleIconFile'] = os.path.basename(iconfile)
         self.opts.plist = plist
         return plist
     
+    #--- Runtime
     def get_runtime(self, prefix=None, version=None):
         # XXX - this is a bit of a hack!
         #       ideally we'd use dylib functions to figure this out
@@ -499,6 +450,7 @@ class PluginBuilder:
         if self.opts.semi_standalone or self.opts.alias:
             yield runtime
     
+    #--- Misc pre-build
     def initialize_prescripts(self):
         prescripts = []
         if self.opts.site_packages or self.opts.alias:
@@ -528,25 +480,18 @@ class PluginBuilder:
         prescripts = self.opts.target.prescripts
         self.opts.target.prescripts = newprescripts + prescripts
     
-    def fixup_distribution(self):
-        plugin = self.opts.plugin
-
-        # Convert our args into target objects.
-        self.opts.target = Target(plugin)
-
-        # also the directory where the pythonXX.dylib must reside
-        app_dir = os.path.dirname(self.opts.target.get_dest_base())
-        if os.path.isabs(app_dir):
-            raise DistutilsOptionError(
-                  "app directory must be relative: %s" % (app_dir,))
-        app_dir = os.path.join(self.folders.dist_dir, app_dir)
-        mkpath(app_dir)
-    
     def process_recipes(self, mf, filters, flatpackages, loader_files):
-        rdict = dict(iterRecipes())
+        rdict = {}
+        for name in dir(recipes):
+            if name.startswith('_'):
+                continue
+            check = getattr(getattr(recipes, name), 'check', None)
+            if check is not None:
+                rdict[name] = check
+        # XXX This control flow below seems rather hacky. Isn't there a better way?
         while True:
             for name, check in rdict.items():
-                rval = check(None, mf) # the 'cmd arg is used in no receipt, it should be removed.
+                rval = check(mf)
                 if rval is None:
                     continue
                 # we can pull this off so long as we stop the iter
@@ -568,16 +513,80 @@ class PluginBuilder:
                 break
             else:
                 break
-    
+    #--- Data manipulation
     def iter_data_files(self):
         for (path, files) in map(normalize_data_file, self.opts.resources):
             for fn in files:
                 yield fn, os.path.join(path, os.path.basename(fn))
     
+    def iter_frameworks(self):
+        for fn in self.opts.frameworks:
+            fmwk = macholib.dyld.framework_info(fn)
+            if fmwk is None:
+                yield fn
+            else:
+                basename = fmwk['shortname'] + '.framework'
+                yield os.path.join(fmwk['location'], basename)
+    
+    #--- Modulefinder and collect
+    def collect_packagedirs(self):
+        return list(filter(os.path.exists, [
+            os.path.join(os.path.realpath(get_bootstrap(pkg)), '')
+            for pkg in self.opts.packages
+        ]))
+    
+    def collect_scripts(self):
+        # these contains file names
+        target = self.opts.target
+        scripts = {target.script,}
+        scripts.update(k for k in target.prescripts if isinstance(k, str))
+        return scripts
+    
+    def collect_filters(self):
+        return [has_filename_filter] + list(self.opts.filters)
+    
+    def finalize_modulefinder(self, mf):
+        for item in mf.flatten():
+            if isinstance(item, Package) and item.filename == '-':
+                fn = os.path.join(self.folders.temp_dir, 'empty_package', '__init__.py')
+                if not os.path.exists(fn):
+                    dn = os.path.dirname(fn)
+                    if not os.path.exists(dn):
+                        os.makedirs(dn)
+                    fp = open(fn, 'w')
+                    fp.close()
+
+                item.filename = fn
+
+        py_files, extensions = parse_mf_results(mf)
+        py_files = list(py_files)
+        extensions = list(extensions)
+        return py_files, extensions
+
+    def filter_dependencies(self, mf, filters):
+        print("*** filtering dependencies ***")
+        nodes_seen, nodes_removed, nodes_orphaned = mf.filterStack(filters)
+        print('%d total' % (nodes_seen,))
+        print('%d filtered' % (nodes_removed,))
+        print('%d orphaned' % (nodes_orphaned,))
+        print('%d remaining' % (nodes_seen - nodes_removed,))
+    
+    #--- Build
+    def create_bundle(self, target, script):
+        plist = self.opts.plist
+        base = target.get_dest_base()
+        appdir = os.path.join(self.folders.dist_dir, os.path.dirname(base))
+        appname = plist['CFBundleName']
+        print("*** creating plugin bundle: %s ***" % (appname,))
+        if self.runtime_preferences:
+            plist.setdefault('PyRuntimeLocations', self.runtime_preferences)
+        appdir, plist = create_pluginbundle(appdir, appname, plist=plist)
+        resdir = os.path.join(appdir, 'Contents', 'Resources')
+        return appdir, resdir, plist
+    
     def build_executable(self, target, pkgexts, copyexts, script):
         # Build an executable for the target
-        appdir, resdir, plist = create_bundle(target, script, self.folders.dist_dir, self.opts.plist,
-            self.runtime_preferences)
+        appdir, resdir, plist = self.create_bundle(target, script)
         self.appdir = appdir
         self.opts.plist = plist
 
@@ -643,7 +652,7 @@ class PluginBuilder:
     
     def build_alias_executable(self, target, script):
         # Build an alias executable for the target
-        appdir, resdir, plist = create_bundle(target, script, self.folders.dist_dir, self.opts.plist, self.runtime_preferences)
+        appdir, resdir, plist = self.create_bundle(target, script)
 
         # symlink python executable
         execdst = os.path.join(appdir, 'Contents', 'MacOS', 'python')
@@ -662,7 +671,6 @@ class PluginBuilder:
         force_symlink(os.path.join(realhome, 'config'), os.path.join(pyhome, 'config'))
         
         # symlink data files
-        # XXX: fixme: need to integrate automatic data conversion
         for src, dest in self.iter_data_files():
             dest = os.path.join(resdir, dest)
             if src == dest:
@@ -671,7 +679,7 @@ class PluginBuilder:
             force_symlink(os.path.abspath(src), dest)
 
         # symlink frameworks
-        for src in iter_frameworks(self.opts.frameworks):
+        for src in self.iter_frameworks():
             dest = os.path.join(appdir, 'Contents', 'Frameworks', os.path.basename(src))
             if src == dest:
                 continue
@@ -691,6 +699,29 @@ class PluginBuilder:
 
         target.appdir = appdir
         return appdir
+    
+    def create_loader(self, item):
+        # Hm, how to avoid needless recreation of this file?
+        slashname = item.identifier.replace('.', os.sep)
+        pathname = os.path.join(self.folders.temp_dir, "%s.py" % slashname)
+        if os.path.exists(pathname):
+            if self.opts.verbose:
+                print(("skipping python loader for extension %r"
+                    % (item.identifier,)))
+        else:
+            mkpath(os.path.dirname(pathname))
+            # and what about dry_run?
+            if self.opts.verbose:
+                print(("creating python loader for extension %r"
+                    % (item.identifier,)))
+
+            fname = slashname + os.path.splitext(item.filename)[1]
+            source = make_loader(fname)
+            if not self.opts.dry_run:
+                open(pathname, "w").write(source)
+            else:
+                return
+        return SourceModule(item.identifier, pathname)
     
     def create_binaries(self, py_files, pkgdirs, extensions, loader_files):
         print("*** create binaries ***")
@@ -714,7 +745,7 @@ class PluginBuilder:
                 pkgexts.append(ext)
             else:
                 if '.' in ext.identifier:
-                    py_files.append(create_loader(ext, self.folders.temp_dir, self.opts.verbose, self.opts.dry_run))
+                    py_files.append(self.create_loader(ext))
                 copyexts.append(ext)
             extmap[fn] = ext
 
@@ -788,9 +819,9 @@ class PluginBuilder:
     
     def run_normal(self):
         debug = 4 if self.opts.debug_modulegraph else 0
-        mf = find_modules(scripts=collect_scripts(self.opts.target), includes=self.opts.includes,
+        mf = find_modules(scripts=self.collect_scripts(), includes=self.opts.includes,
             packages=self.opts.packages, excludes=self.opts.excludes, debug=debug)
-        filters = collect_filters(self.opts.filters)
+        filters = self.collect_filters()
         flatpackages = {}
         loader_files = []
         self.process_recipes(mf, filters, flatpackages, loader_files)
@@ -799,17 +830,16 @@ class PluginBuilder:
             import pdb
             pdb.Pdb().set_trace()
 
-        filter_dependencies(mf, filters)
+        self.filter_dependencies(mf, filters)
 
-        py_files, extensions = finalize_modulefinder(mf, self.folders.temp_dir)
-        pkgdirs = collect_packagedirs(self.opts.packages)
+        py_files, extensions = self.finalize_modulefinder(mf)
+        pkgdirs = self.collect_packagedirs()
         self.create_binaries(py_files, pkgdirs, extensions, loader_files)
 
 def build_plugin(main_script_path, **options):
     opts = Options(main_script_path, **options)
-    folders = Folders(opts.dist_dir, opts.bdist_base, opts.semi_standalone)
+    folders = Folders(opts)
     builder = PluginBuilder(folders, opts)
-    builder.fixup_distribution()
     builder.initialize_plist()
     
     sys_old_path = sys.path[:]

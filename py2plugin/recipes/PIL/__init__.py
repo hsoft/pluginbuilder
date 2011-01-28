@@ -2,7 +2,7 @@ import os, sys
 from io import StringIO
 from modulegraph.util import imp_find_module
 
-def check(cmd, mf):
+def check(mf):
     m = mf.findNode('Image') or mf.findNode('PIL.Image')
     if m is None or m.filename is None:
         return None

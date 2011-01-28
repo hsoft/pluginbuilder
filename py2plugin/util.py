@@ -183,38 +183,6 @@ def fancy_split(s, sep=","):
         return [item.strip() for item in s.split(sep)]
     return s
 
-class FileSet(object):
-    # A case insensitive but case preserving set of files
-    def __init__(self, iterable=None):
-        self._dict = {}
-        if iterable is not None:
-            for arg in iterable:
-                self.add(arg)
-
-    def __repr__(self):
-        return "<FileSet %s at %x>" % (list(self._dict.values()), id(self))
-
-    def add(self, fname):
-        self._dict[fname.upper()] = fname
-
-    def remove(self, fname):
-        del self._dict[fname.upper()]
-
-    def __contains__(self, fname):
-        return fname.upper() in list(self._dict.keys())
-
-    def __getitem__(self, index):
-        key = list(self._dict.keys())[index]
-        return self._dict[key]
-
-    def __len__(self):
-        return len(self._dict)
-
-    def copy(self):
-        res = FileSet()
-        res._dict.update(self._dict)
-        return res
-
 LOADER = """
 def __load():
     import imp, os, sys
@@ -342,41 +310,6 @@ def skipscm(ofn):
         return False
     return True
 
-def skipfunc(junk=(), junk_exts=(), chain=()):
-    chain = tuple(chain)
-    def _skipfunc(fn):
-        if os.path.basename(fn) in junk:
-            return False
-        elif os.path.splitext(fn)[1] in junk_exts:
-            return False
-        for func in chain:
-            if not func(fn):
-                return False
-        else:
-            return True
-    return _skipfunc
-
-JUNK = {'.DS_Store', '.gdb_history', 'build', 'dist', '__pycache__'} | SCMDIRS
-JUNK_EXTS = {'.pbxuser', '.pyc', '.pyo', '.swp'}
-skipjunk = skipfunc(JUNK, JUNK_EXTS)
-
-def get_magic(platform=sys.platform):
-    if platform == 'darwin':
-        import struct
-        import macholib.mach_o
-        return [
-            struct.pack('!L', macholib.mach_o.MH_MAGIC),
-            struct.pack('!L', macholib.mach_o.MH_CIGAM),
-            struct.pack('!L', macholib.mach_o.MH_MAGIC_64),
-            struct.pack('!L', macholib.mach_o.MH_CIGAM_64),
-            struct.pack('!L', macholib.mach_o.FAT_MAGIC),
-        ]
-    elif platform == 'linux2':
-        return ['\x7fELF']
-    elif platform == 'win32':
-        return ['MZ']
-    return None
-
 def iter_platform_files(path, is_platform_file=macholib.util.is_platform_file):
     """
     Iterate over all of the platform files in a directory
@@ -481,21 +414,3 @@ def copy_tree(src, dst,
             outputs.append(dst_name)
 
     return outputs
-
-
-def walk_files(path):
-    for root, dirs, files in os.walk(path):
-        for f in files:
-            yield f
-
-def find_app(app):
-    dpath = os.path.realpath(app)
-    if os.path.exists(dpath):
-        return dpath
-    if os.path.isabs(app):
-        return None
-    for path in os.environ.get('PATH', '').split(':'):
-        dpath = os.path.realpath(os.path.join(path, app))
-        if os.path.exists(dpath):
-            return dpath
-    return None
