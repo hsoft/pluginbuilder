@@ -24,7 +24,6 @@ from . import bundletemplate, recipes
 from .util import (byte_compile, make_loader, copy_tree, strip_files, in_system_path,
     makedirs, iter_platform_files, skipscm, copy_file_data, os_path_isdir, copy_resource, SCMDIRS,
     mergecopy, mergetree, make_exec)
-from .filters import not_stdlib_filter
 
 from distutils.sysconfig import get_config_var
 PYTHONFRAMEWORK=get_config_var('PYTHONFRAMEWORK')
@@ -284,6 +283,7 @@ class Options:
         self.use_pythonpath = use_pythonpath
         self.verbose = verbose
         self.dry_run = dry_run
+        self.additional_paths = [os.path.abspath(os.path.dirname(self.target.script))]
         self.includes = set(includes if includes else [])
         self.includes.add('encodings.*')
         self.packages = set(packages if packages else [])
@@ -320,13 +320,9 @@ class Options:
         else:
             self.plist = dict(self.plist)
         
-        self.semi_standalone = is_system()
         self.dist_dir = dist_dir
         self.debug_skip_macholib = debug_skip_macholib
         self.debug_modulegraph = debug_modulegraph
-        self.filters = []
-        if self.semi_standalone:
-            self.filters.append(not_stdlib_filter)
         if self.iconfile is None and 'CFBundleIconFile' not in self.plist:
             # Default is the generic applet icon in the framework
             iconfile = os.path.join(sys.prefix, 'Resources', 'Python.app',
@@ -337,8 +333,7 @@ class Options:
 
 class Folders:
     def __init__(self, opts):
-        bdistdir_fmt = 'python%s-semi_standalone' if opts.semi_standalone else 'python%s-standalone'
-        self.bdist_dir = os.path.join(opts.bdist_base, bdistdir_fmt % (sys.version[:3],), 'app')
+        self.bdist_dir = os.path.join(opts.bdist_base, 'python%s-standalone' % (sys.version[:3],), 'app')
         
         self.collect_dir = os.path.abspath(os.path.join(self.bdist_dir, "collect"))
         mkpath(self.collect_dir)
@@ -446,7 +441,7 @@ class PluginBuilder:
     def get_runtime_preferences(self, prefix=None, version=None):
         dylib, runtime = self.get_runtime(prefix=prefix, version=version)
         yield os.path.join('@executable_path', '..', 'Frameworks', dylib)
-        if self.opts.semi_standalone or self.opts.alias:
+        if self.opts.alias:
             yield runtime
     
     #--- Misc pre-build
@@ -541,9 +536,6 @@ class PluginBuilder:
         scripts.update(k for k in target.prescripts if isinstance(k, str))
         return scripts
     
-    def collect_filters(self):
-        return [has_filename_filter] + list(self.opts.filters)
-    
     def finalize_modulefinder(self, mf):
         for item in mf.flatten():
             if isinstance(item, Package) and item.filename == '-':
@@ -608,23 +600,18 @@ class PluginBuilder:
         force_symlink('../../site.py', os.path.join(pydir, 'site.py'))
         realcfg = os.path.dirname(sysconfig.get_makefile_filename())
         cfgdir = os.path.join(resdir, os.path.relpath(realcfg, sys.prefix))
-        real_include = os.path.join(sys.prefix, 'include')
-        if self.opts.semi_standalone:
-            force_symlink(realcfg, cfgdir)
-            force_symlink(real_include, os.path.join(resdir, 'include'))
-        else:
-            mkpath(cfgdir)
-            for fn in 'Makefile', 'Setup', 'Setup.local', 'Setup.config':
-                rfn = os.path.join(realcfg, fn)
-                if os.path.exists(rfn):
-                    copy_file(rfn, os.path.join(cfgdir, fn))
+        mkpath(cfgdir)
+        for fn in 'Makefile', 'Setup', 'Setup.local', 'Setup.config':
+            rfn = os.path.join(realcfg, fn)
+            if os.path.exists(rfn):
+                copy_file(rfn, os.path.join(cfgdir, fn))
 
-            # see copy_python_framework() for explanation.
-            pyconfig_path = sysconfig.get_config_h_filename()
-            pyconfig_path_relative = os.path.relpath(os.path.dirname(pyconfig_path), sys.prefix)
-            inc_dir = os.path.join(resdir, pyconfig_path_relative)
-            mkpath(inc_dir)
-            copy_file(pyconfig_path, os.path.join(inc_dir, 'pyconfig.h'))
+        # see copy_python_framework() for explanation.
+        pyconfig_path = sysconfig.get_config_h_filename()
+        pyconfig_path_relative = os.path.relpath(os.path.dirname(pyconfig_path), sys.prefix)
+        inc_dir = os.path.join(resdir, pyconfig_path_relative)
+        mkpath(inc_dir)
+        copy_file(pyconfig_path, os.path.join(inc_dir, 'pyconfig.h'))
 
 
         copy_tree(self.folders.collect_dir, pydir)
@@ -776,30 +763,24 @@ class PluginBuilder:
         dst = self.build_executable(target, pkgexts, copyexts, target.script)
         exp = os.path.join(dst, 'Contents', 'MacOS')
         execdst = os.path.join(exp, 'python')
-        if self.opts.semi_standalone:
-            force_symlink(sys.executable, execdst)
+        if os.path.exists(os.path.join(sys.prefix, ".Python")):
+            fn = os.path.join(sys.prefix, "lib", "python%d.%d"%(sys.version_info[:2]), "orig-prefix.txt")
+            if os.path.exists(fn):
+                prefix = open(fn, 'rU').read().strip()
+
+            rest_path = sys.executable[len(sys.prefix)+1:]
+            if rest_path.startswith('.'):
+                rest_path = rest_path[1:]
+
+            print("XXXX", os.path.join(prefix, rest_path))
+            copy_file(os.path.join(prefix, rest_path), execdst)
+
         else:
-            if os.path.exists(os.path.join(sys.prefix, ".Python")):
-                fn = os.path.join(sys.prefix, "lib", "python%d.%d"%(sys.version_info[:2]), "orig-prefix.txt")
-                if os.path.exists(fn):
-                    prefix = open(fn, 'rU').read().strip()
-
-                rest_path = sys.executable[len(sys.prefix)+1:]
-                if rest_path.startswith('.'):
-                    rest_path = rest_path[1:]
-
-                print("XXXX", os.path.join(prefix, rest_path))
-                copy_file(os.path.join(prefix, rest_path), execdst)
-
-            else:
-                copy_file(sys.executable, execdst)
+            copy_file(sys.executable, execdst)
         if not self.opts.debug_skip_macholib:
             mm = PythonStandalone(dst, executable_path=exp)
             dylib, runtime = self.get_runtime()
-            if self.opts.semi_standalone:
-                mm.excludes.append(runtime)
-            else:
-                mm.mm.run_file(runtime)
+            mm.mm.run_file(runtime)
             for exclude in self.opts.dylib_excludes:
                 info = macholib.dyld.framework_info(exclude)
                 if info is not None:
@@ -820,7 +801,7 @@ class PluginBuilder:
         debug = 4 if self.opts.debug_modulegraph else 0
         mf = find_modules(scripts=self.collect_scripts(), includes=self.opts.includes,
             packages=self.opts.packages, excludes=self.opts.excludes, debug=debug)
-        filters = self.collect_filters()
+        filters = [has_filename_filter]
         flatpackages = {}
         loader_files = []
         self.process_recipes(mf, filters, flatpackages, loader_files)
@@ -834,22 +815,18 @@ class PluginBuilder:
         py_files, extensions = self.finalize_modulefinder(mf)
         pkgdirs = self.collect_packagedirs()
         self.create_binaries(py_files, pkgdirs, extensions, loader_files)
+    
 
 def build_plugin(main_script_path, **options):
     opts = Options(main_script_path, **options)
     folders = Folders(opts)
     builder = PluginBuilder(folders, opts)
     builder.initialize_plist()
+    builder.initialize_prescripts()
     
     sys_old_path = sys.path[:]
-    extra_paths = [os.path.dirname(opts.target.script)]
-    opts.additional_paths = [os.path.abspath(p) for p in extra_paths if p is not None]
-    sys.path[:0] = opts.additional_paths
-
-    # this needs additional_paths
-    builder.initialize_prescripts()
-
     try:
+        sys.path[:0] = opts.additional_paths
         if opts.alias:
             builder.run_alias()
         else:
