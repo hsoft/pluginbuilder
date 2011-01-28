@@ -8,14 +8,12 @@ from io import StringIO
 import sysconfig
 from itertools import chain
 
-
 from setuptools import Command
 from distutils.util import convert_path
 from distutils.dir_util import mkpath
 from distutils.file_util import copy_file
 from distutils import log
 from distutils.errors import DistutilsOptionError
-from pkg_resources import require
 
 from modulegraph.find_modules import find_modules, parse_mf_results
 from modulegraph.modulegraph import SourceModule, Package, os_listdir
@@ -279,6 +277,62 @@ def create_bundle(target, script, dist_dir, plist, runtime_preferences=None):
     resdir = os.path.join(appdir, 'Contents', 'Resources')
     return appdir, resdir, plist
 
+def iter_frameworks(frameworks):
+    for fn in frameworks:
+        fmwk = macholib.dyld.framework_info(fn)
+        if fmwk is None:
+            yield fn
+        else:
+            basename = fmwk['shortname'] + '.framework'
+            yield os.path.join(fmwk['location'], basename)
+
+def collect_packagedirs(packages):
+    return list(filter(os.path.exists, [
+        os.path.join(os.path.realpath(get_bootstrap(pkg)), '')
+        for pkg in packages
+    ]))
+
+def collect_scripts(targets):
+    # these contains file names
+    scripts = set()
+
+    for target in targets:
+        scripts.add(target.script)
+        scripts.update([
+            k for k in target.prescripts if isinstance(k, str)
+        ])
+
+    return scripts
+
+def collect_filters(filters):
+    return [has_filename_filter] + list(filters)
+
+def finalize_modulefinder(mf, temp_dir):
+    for item in mf.flatten():
+        if isinstance(item, Package) and item.filename == '-':
+            fn = os.path.join(temp_dir, 'empty_package', '__init__.py')
+            if not os.path.exists(fn):
+                dn = os.path.dirname(fn)
+                if not os.path.exists(dn):
+                    os.makedirs(dn)
+                fp = open(fn, 'w')
+                fp.close()
+
+            item.filename = fn
+
+    py_files, extensions = parse_mf_results(mf)
+    py_files = list(py_files)
+    extensions = list(extensions)
+    return py_files, extensions
+
+def filter_dependencies(mf, filters):
+    print("*** filtering dependencies ***")
+    nodes_seen, nodes_removed, nodes_orphaned = mf.filterStack(filters)
+    print('%d total' % (nodes_seen,))
+    print('%d filtered' % (nodes_removed,))
+    print('%d orphaned' % (nodes_orphaned,))
+    print('%d remaining' % (nodes_seen - nodes_removed,))
+
 class py2plugin(Command):
     description = "create a Mac OS X application or plugin from Python scripts"
     # List of option tuples: long name, short name (None if no short
@@ -322,8 +376,6 @@ class py2plugin(Command):
          "directory to put final built distributions in (default is dist)"),
         ('site-packages', None,
          "include the system and user site-packages into sys.path"),
-        ("strip", 'S',
-         "strip debug and local symbols from output (on by default, for compatibility)"),
         ('debug-modulegraph', None,
          'Drop to pdb console after the module finding phase is complete'),
         ("debug-skip-macholib", None,
@@ -331,7 +383,6 @@ class py2plugin(Command):
         ]
 
     boolean_options = [
-        "strip",
         "no-strip",
         "site-packages",
         "semi-standalone",
@@ -346,7 +397,6 @@ class py2plugin(Command):
         self.plugin = None
         self.bdist_base = None
         self.optimize = 0
-        self.strip = True
         self.no_strip = False
         self.iconfile = None
         self.alias = 0
@@ -365,13 +415,8 @@ class py2plugin(Command):
         self.debug_skip_macholib = False
         self.debug_modulegraph = False
         self.filters = []
-        self.eggs = []
-
-    def finalize_options (self):
-        if not self.strip:
-            self.no_strip = True
-        elif self.no_strip:
-            self.strip = False
+    
+    def finalize_options(self):
         self.optimize = int(self.optimize)
         if self.argv_inject and isinstance(self.argv_inject, str):
             self.argv_inject = shlex.split(self.argv_inject)
@@ -382,9 +427,6 @@ class py2plugin(Command):
         self.excludes.add('readline')
         # included by apptemplate
         self.excludes.add('site')
-        if getattr(self.distribution, 'install_requires', None):
-            self.includes.add('pkg_resources')
-            self.eggs = require(self.distribution.install_requires)
         dylib_excludes = fancy_split(self.dylib_excludes)
         self.dylib_excludes = []
         for fn in dylib_excludes:
@@ -486,12 +528,6 @@ class py2plugin(Command):
             yield runtime
 
     def run(self):
-        if hasattr(self.distribution, "install_requires") \
-                and self.distribution.install_requires:
-
-            self.distribution.fetch_build_eggs(self.distribution.install_requires)
-
-
         build = self.reinitialize_command('build')
         build.build_base = self.bdist_base
         build.run()
@@ -516,7 +552,10 @@ class py2plugin(Command):
         self.initialize_prescripts()
 
         try:
-            self._run()
+            if self.alias:
+                self.run_alias()
+            else:
+                self.run_normal()
         finally:
             sys.path = sys_old_path
 
@@ -527,19 +566,7 @@ class py2plugin(Command):
         for (path, files) in map(normalize_data_file, allres):
             for fn in files:
                 yield fn, os.path.join(path, os.path.basename(fn))
-
-    def collect_scripts(self):
-        # these contains file names
-        scripts = set()
-
-        for target in self.targets:
-            scripts.add(target.script)
-            scripts.update([
-                k for k in target.prescripts if isinstance(k, str)
-            ])
-
-        return scripts
-
+    
     def get_plist_options(self):
         return dict(
             PyOptions=dict(
@@ -575,10 +602,7 @@ class py2plugin(Command):
         for target in self.targets:
             dst = self.build_alias_executable(target, target.script)
             self.app_files.append(dst)
-
-    def collect_filters(self):
-        return [has_filename_filter] + list(self.filters)
-
+    
     def process_recipes(self, mf, filters, flatpackages, loader_files):
         rdict = dict(iterRecipes())
         while True:
@@ -606,58 +630,12 @@ class py2plugin(Command):
                 break
             else:
                 break
-
-    def _run(self):
-        try:
-            if self.alias:
-                self.run_alias()
-            else:
-                self.run_normal()
-        except:
-            raise
-            # XXX - remove when not debugging
-            #       distutils sucks
-            import pdb, sys, traceback
-            traceback.print_exc()
-            pdb.post_mortem(sys.exc_info()[2])
-
-    def filter_dependencies(self, mf, filters):
-        print("*** filtering dependencies ***")
-        nodes_seen, nodes_removed, nodes_orphaned = mf.filterStack(filters)
-        print('%d total' % (nodes_seen,))
-        print('%d filtered' % (nodes_removed,))
-        print('%d orphaned' % (nodes_orphaned,))
-        print('%d remaining' % (nodes_seen - nodes_removed,))
-
-    def finalize_modulefinder(self, mf):
-        for item in mf.flatten():
-            if isinstance(item, Package) and item.filename == '-':
-                fn = os.path.join(self.temp_dir, 'empty_package', '__init__.py')
-                if not os.path.exists(fn):
-                    dn = os.path.dirname(fn)
-                    if not os.path.exists(dn):
-                        os.makedirs(dn)
-                    fp = open(fn, 'w')
-                    fp.close()
-
-                item.filename = fn
-
-        py_files, extensions = parse_mf_results(mf)
-        py_files = list(py_files)
-        extensions = list(extensions)
-        return py_files, extensions
-
-    def collect_packagedirs(self):
-        return list(filter(os.path.exists, [
-            os.path.join(os.path.realpath(get_bootstrap(pkg)), '')
-            for pkg in self.packages
-        ]))
-
+    
     def run_normal(self):
         debug = 4 if self.debug_modulegraph else 0
-        mf = find_modules(scripts=self.collect_scripts(), includes=self.includes,
+        mf = find_modules(scripts=collect_scripts(self.targets), includes=self.includes,
             packages=self.packages, excludes=self.excludes, debug=debug)
-        filters = self.collect_filters()
+        filters = collect_filters(self.filters)
         flatpackages = {}
         loader_files = []
         self.process_recipes(mf, filters, flatpackages, loader_files)
@@ -666,12 +644,12 @@ class py2plugin(Command):
             import pdb
             pdb.Pdb().set_trace()
 
-        self.filter_dependencies(mf, filters)
+        filter_dependencies(mf, filters)
 
-        py_files, extensions = self.finalize_modulefinder(mf)
-        pkgdirs = self.collect_packagedirs()
+        py_files, extensions = finalize_modulefinder(mf, self.temp_dir)
+        pkgdirs = collect_packagedirs(self.packages)
         self.create_binaries(py_files, pkgdirs, extensions, loader_files)
-
+    
     def create_directories(self):
         bdist_base = self.bdist_base
         if self.semi_standalone:
@@ -787,7 +765,7 @@ class py2plugin(Command):
                 for fmwk in self.frameworks:
                     mm.mm.run_file(fmwk)
                 platfiles = mm.run()
-                if self.strip and not self.dry_run:
+                if not self.no_strip and not self.dry_run:
                     platfiles = strip_dsym(platfiles, self.appdir)
                     strip_files_and_report(platfiles, self.verbose)
             self.app_files.append(dst)
@@ -860,15 +838,6 @@ class py2plugin(Command):
             prescripts = getattr(target, 'prescripts', [])
             target.prescripts = newprescripts + prescripts
     
-    def iter_frameworks(self):
-        for fn in self.frameworks:
-            fmwk = macholib.dyld.framework_info(fn)
-            if fmwk is None:
-                yield fn
-            else:
-                basename = fmwk['shortname'] + '.framework'
-                yield os.path.join(fmwk['location'], basename)
-    
     def build_alias_executable(self, target, script):
         # Build an alias executable for the target
         appdir, resdir, plist = create_bundle(target, script, self.dist_dir, self.plist, self.runtime_preferences)
@@ -902,7 +871,7 @@ class py2plugin(Command):
             force_symlink(os.path.abspath(src), dest)
 
         # symlink frameworks
-        for src in self.iter_frameworks():
+        for src in iter_frameworks(self.frameworks):
             dest = os.path.join(
                 appdir, 'Contents', 'Frameworks', os.path.basename(src))
             if src == dest:
