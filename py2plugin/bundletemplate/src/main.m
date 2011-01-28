@@ -1,7 +1,4 @@
 //
-//  main.m
-//  apptemplate
-//
 //  Created by Bob Ippolito on Mon September 20 2004.
 //  Copyright (c) 2004 Bob Ippolito. All rights reserved.
 //
@@ -18,6 +15,8 @@
 #include <langinfo.h>
 
 #include <objc/objc-class.h>
+
+#include <Python.h>
 
 //
 // Constants
@@ -36,46 +35,9 @@ NSString *ERR_COLONPATH = @"Python bundles can not currently run from paths cont
 #define PYMACAPP_NSLOOKUPSYMBOLINIMAGEFLAGS (NSLOOKUPSYMBOLINIMAGE_OPTION_BIND | NSLOOKUPSYMBOLINIMAGE_OPTION_RETURN_ON_ERROR)
 
 //
-// Typedefs
-//
-
-#define Py_file_input 257
-typedef int PyObject;
-typedef int PyThreadState;
-typedef enum {PyGILState_LOCKED, PyGILState_UNLOCKED} PyGILState_STATE;
-typedef PyGILState_STATE (*PyGILState_EnsurePtr)(void);
-typedef void (*PyGILState_ReleasePtr)(PyGILState_STATE);
-typedef PyThreadState *(*PyThreadState_SwapPtr)(PyThreadState *);
-typedef void (*PyEval_ReleaseLockPtr)(void);
-typedef void (*PyErr_ClearPtr)(void);
-typedef void (*PyErr_PrintPtr)(void);
-typedef int (*PyErr_OccurredPtr)(void);
-typedef PyObject *(*PyBytes_FromStringPtr)(const char *);
-typedef int (*PyList_InsertPtr)(PyObject *, int, PyObject *);
-typedef void (*Py_DecRefPtr)(PyObject *);
-typedef void (*Py_SetProgramNamePtr)(const wchar_t *);
-typedef int (*Py_IsInitializedPtr)(void);
-typedef void (*Py_InitializePtr)(void);
-typedef void (*PyEval_InitThreadsPtr)(void);
-typedef PyObject *(*PyRun_FilePtr)(FILE *, const char *, int, PyObject *, PyObject *);
-typedef PyObject *(*PySys_GetObjectPtr)(const char *);
-typedef int *(*PySys_SetArgvPtr)(int argc, char **argv);
-typedef PyObject *(*PyObject_StrPtr)(PyObject *);
-typedef const char *(*PyBytes_AsStringPtr)(PyObject *);
-typedef PyObject *(*PyObject_GetAttrStringPtr)(PyObject *, const char *);
-typedef PyObject *(*PyObject_CallMethodPtr)(PyObject *, const char *, const char *, ...);
-typedef PyObject *(*PyImport_ImportModulePtr)(char *);
-typedef PyObject *(*PyImport_AddModulePtr)(char *);
-typedef PyObject *(*PyModule_AddStringConstantPtr)(PyObject *, char *, char *);
-typedef PyObject *(*PyModule_AddObjectPtr)(PyObject *, char *, PyObject *);
-typedef PyObject *(*PyModule_GetDictPtr)(PyObject *);
-typedef void (*PyObject_SetItemPtr)(PyObject *, PyObject *, PyObject *);
-
-//
 // Signatures
 //
 
-static void DefaultDecRef(PyObject *op);
 static int report_error(NSString *err);
 static int report_linkEdit_error(const char* name);
 static int report_script_error(NSString *err, NSString *errClassName, NSString *errName);
@@ -124,16 +86,6 @@ NSBundle *bundleBundle(void) {
         myBundle = [[NSBundle alloc] initWithPath:path];
     }
     return myBundle;
-}
-
-//
-// THIS WILL NOT WORK WITH Py_TRACE_REFS / Py_DEBUG ON UNLESS USING 2.4 OR LATER!
-//
-static
-void DefaultDecRef(PyObject *op) {
-    if (op != NULL) {
-        --(*op);
-    }
 }
 
 static
@@ -329,56 +281,6 @@ int pyobjc_main(int argc, char * const *argv, char * const *envp) {
     if (!py_dylib) { 
         return report_linkEdit_error([pyLocation fileSystemRepresentation]);
     }
-
-    // Load the symbols we need from Python. We avoid lookups of unicode methods because their
-    // names are mangled by Python (because of UCS2/UCS4 stuff) and looking them up reliably is
-    // problematic.
-    NSSymbol tmpSymbol;
-#define LOOKUP_SYMBOL(NAME) \
-    tmpSymbol = NSLookupSymbolInImage(py_dylib, "_" #NAME, PYMACAPP_NSLOOKUPSYMBOLINIMAGEFLAGS)
-#define LOOKUP_DEFINEADDRESS(NAME, ADDRESS) \
-    NAME ## Ptr NAME = (NAME ## Ptr)ADDRESS
-#define LOOKUP_DEFINE(NAME) \
-    LOOKUP_DEFINEADDRESS(NAME, NSAddressOfSymbol(tmpSymbol))
-#define LOOKUP(NAME) \
-    LOOKUP_SYMBOL(NAME); \
-    if ( !tmpSymbol ) \
-        return report_linkEdit_error(#NAME); \
-    LOOKUP_DEFINE(NAME)
-
-    LOOKUP_SYMBOL(Py_DecRef);
-    LOOKUP_DEFINEADDRESS(Py_DecRef, (tmpSymbol ? NSAddressOfSymbol(tmpSymbol) : &DefaultDecRef));
-    LOOKUP(Py_SetProgramName);
-    LOOKUP(Py_IsInitialized);
-    LOOKUP(Py_Initialize);
-    LOOKUP(PyErr_Clear);
-    LOOKUP(PyErr_Print);
-    LOOKUP(PyErr_Occurred);
-    LOOKUP(PyEval_ReleaseLock);
-    LOOKUP(PyGILState_Ensure);
-    LOOKUP(PyGILState_Release);
-    LOOKUP(PyEval_InitThreads);
-    LOOKUP(PyRun_File);
-    LOOKUP(PySys_GetObject);
-    LOOKUP(PySys_SetArgv);
-    LOOKUP(PyObject_Str);
-    LOOKUP(PyList_Insert);
-    LOOKUP(PyObject_GetAttrString);
-    LOOKUP(PyObject_CallMethod);
-    LOOKUP(PyImport_ImportModule);
-    LOOKUP(PyImport_AddModule);
-    LOOKUP(PyObject_SetItem);
-    LOOKUP(PyModule_AddStringConstant);
-    LOOKUP(PyModule_AddObject);
-    LOOKUP(PyModule_GetDict);
-    LOOKUP(PyThreadState_Swap);
-    LOOKUP(PyBytes_AsString);
-    LOOKUP(PyBytes_FromString);
-
-#undef LOOKUP
-#undef LOOKUP_DEFINE
-#undef LOOKUP_DEFINEADDRESS
-#undef LOOKUP_SYMBOL
 
     int was_initialized = Py_IsInitialized();
 
