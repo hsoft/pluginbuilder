@@ -2,13 +2,10 @@ import imp
 import sys
 import os
 import plistlib
-import shlex
 import shutil
 from io import StringIO
 import sysconfig
-from itertools import chain
 
-from setuptools import Command
 from distutils.util import convert_path
 from distutils.dir_util import mkpath
 from distutils.file_util import copy_file
@@ -24,9 +21,8 @@ import macholib.MachOStandalone
 from macholib.util import has_filename_filter
 
 from py2plugin.create_pluginbundle import create_pluginbundle
-from py2plugin.util import (fancy_split, byte_compile, make_loader, copy_tree,
-    strip_files, in_system_path, makedirs, iter_platform_files, skipscm, copy_file_data,
-    os_path_isdir, copy_resource, SCMDIRS)
+from py2plugin.util import (byte_compile, make_loader, copy_tree, strip_files, in_system_path,
+    makedirs, iter_platform_files, skipscm, copy_file_data, os_path_isdir, copy_resource, SCMDIRS)
 from py2plugin.filters import not_stdlib_filter
 from py2plugin import recipes
 
@@ -350,6 +346,74 @@ class Folders:
         mkpath(self.framework_dir)
     
 
+class Options:
+    def __init__(self, main_script_path, includes=None, packages=None, excludes=None, dylib_excludes=None,
+            iconfile=None, resources=None, frameworks=None, plist=None, optimize=0, strip=True,
+            alias=False, argv_inject=None, use_pythonpath=False, site_package=False, verbose=False,
+            dry_run=False, bdist_base='build', dist_dir='dist', debug_modulegraph=False, 
+            debug_skip_macholib=False):
+        self.plugin = main_script_path
+        self.bdist_base = bdist_base
+        self.optimize = optimize
+        self.strip = strip
+        self.iconfile = iconfile
+        self.alias = alias
+        self.argv_inject = argv_inject
+        self.site_packages = site_package
+        self.use_pythonpath = use_pythonpath
+        self.verbose = verbose
+        self.dry_run = dry_run
+        self.includes = set(includes if includes else [])
+        self.includes.add('encodings.*')
+        self.packages = set(packages if packages else [])
+        self.excludes = set(excludes if excludes else [])
+        self.excludes.add('readline')
+        self.excludes.add('site')
+        self.dylib_excludes = []
+        if dylib_excludes:
+            for fn in dylib_excludes:
+                try:
+                    res = macholib.dyld.framework_find(fn)
+                except ValueError:
+                    try:
+                        res = macholib.dyld.dyld_find(fn)
+                    except ValueError:
+                        res = fn
+                self.dylib_excludes.append(res)
+        self.resources = resources if resources else []
+        self.frameworks = []
+        if frameworks:
+            for fn in frameworks:
+                try:
+                    res = macholib.dyld.framework_find(fn)
+                except ValueError:
+                    res = macholib.dyld.dyld_find(fn)
+                while res in self.dylib_excludes:
+                    self.dylib_excludes.remove(res)
+                self.frameworks.append(res)
+        self.plist = plist if plist else {}
+        if isinstance(self.plist, str):
+            self.plist = plistlib.Plist.fromFile(self.plist)
+        if isinstance(self.plist, plistlib.Dict):
+            self.plist = dict(self.plist.__dict__)
+        else:
+            self.plist = dict(self.plist)
+        
+        self.semi_standalone = is_system()
+        self.dist_dir = dist_dir
+        self.debug_skip_macholib = debug_skip_macholib
+        self.debug_modulegraph = debug_modulegraph
+        self.filters = []
+        if self.semi_standalone:
+            self.filters.append(not_stdlib_filter)
+        if self.iconfile is None and 'CFBundleIconFile' not in self.plist:
+            # Default is the generic applet icon in the framework
+            iconfile = os.path.join(sys.prefix, 'Resources', 'Python.app',
+                'Contents', 'Resources', 'PythonApplet.icns')
+            if os.path.exists(iconfile):
+                self.iconfile = iconfile
+    
+
 class PluginBuilder:
     def __init__(self, folders, opts):
         self.folders = folders
@@ -360,10 +424,10 @@ class PluginBuilder:
         plist = {}
         target = self.opts.target
 
-        version = self.opts.distribution.get_version()
+        version = '0.0.0'
         plist['CFBundleVersion'] = version
 
-        name = self.opts.distribution.get_name()
+        name = 'UNKNOWN'
         if name == 'UNKNOWN':
             base = target.get_dest_base()
             name = os.path.basename(base)
@@ -465,17 +529,10 @@ class PluginBuilder:
         self.opts.target.prescripts = newprescripts + prescripts
     
     def fixup_distribution(self):
-        dist = self.opts.distribution
-
-        # Trying to obtain plugin from dist for backward compatibility
-        # reasons.
-        plugin = dist.plugin
-        # If we can get suitable value from self.plugin, we prefer it.
-        if self.opts.plugin is not None:
-            plugin = self.opts.plugin
+        plugin = self.opts.plugin
 
         # Convert our args into target objects.
-        self.opts.target = Target(plugin[0])
+        self.opts.target = Target(plugin)
 
         # also the directory where the pythonXX.dylib must reside
         app_dir = os.path.dirname(self.opts.target.get_dest_base())
@@ -513,9 +570,7 @@ class PluginBuilder:
                 break
     
     def iter_data_files(self):
-        dist = self.opts.distribution
-        allres = chain(getattr(dist, 'data_files', ()) or (), self.opts.resources)
-        for (path, files) in map(normalize_data_file, allres):
+        for (path, files) in map(normalize_data_file, self.opts.resources):
             for fn in files:
                 yield fn, os.path.join(path, os.path.basename(fn))
     
@@ -724,7 +779,7 @@ class PluginBuilder:
             for fmwk in self.opts.frameworks:
                 mm.mm.run_file(fmwk)
             platfiles = mm.run()
-            if not self.opts.no_strip and not self.opts.dry_run:
+            if self.opts.strip and not self.opts.dry_run:
                 platfiles = strip_dsym(platfiles, self.appdir)
                 strip_files_and_report(platfiles, self.opts.verbose)
     
@@ -750,167 +805,25 @@ class PluginBuilder:
         pkgdirs = collect_packagedirs(self.opts.packages)
         self.create_binaries(py_files, pkgdirs, extensions, loader_files)
 
-class py2plugin(Command):
-    description = "create a Mac OS X application or plugin from Python scripts"
-    # List of option tuples: long name, short name (None if no short
-    # name), and help string.
-
-    user_options = [
-        ("plugin=", None,
-         "puglin bundle to be built"),
-        ('optimize=', 'O',
-         "optimization level: -O1 for \"python -O\", "
-         "-O2 for \"python -OO\", and -O0 to disable [default: -O0]"),
-        ("includes=", 'i',
-         "comma-separated list of modules to include"),
-        ("packages=", 'p',
-         "comma-separated list of packages to include"),
-        ("iconfile=", None,
-         "Icon file to use"),
-        ("excludes=", 'e',
-         "comma-separated list of modules to exclude"),
-        ("dylib-excludes=", 'E',
-         "comma-separated list of frameworks or dylibs to exclude"),
-        ("resources=", 'r',
-         "comma-separated list of additional data files and folders to include (not for code!)"),
-        ("frameworks=", 'f',
-         "comma-separated list of additional frameworks and dylibs to include"),
-        ("plist=", 'P',
-         "Info.plist template file, dict, or plistlib.Plist"),
-        ("no-strip", None,
-         "do not strip debug and local symbols from output"),
-        ("semi-standalone", 's',
-         "depend on an existing installation of Python " + installation_info()),
-        ("alias", 'A',
-         "Use an alias to current source file (for development only!)"),
-        ("argv-inject=", None,
-         "Inject some commands into the argv"),
-        ("use-pythonpath", None,
-         "Allow PYTHONPATH to effect the interpreter's environment"),
-        ('bdist-base=', 'b',
-         'base directory for build library (default is build)'),
-        ('dist-dir=', 'd',
-         "directory to put final built distributions in (default is dist)"),
-        ('site-packages', None,
-         "include the system and user site-packages into sys.path"),
-        ('debug-modulegraph', None,
-         'Drop to pdb console after the module finding phase is complete'),
-        ("debug-skip-macholib", None,
-         "skip macholib phase (app will not be standalone!)"),
-        ]
-
-    boolean_options = [
-        "no-strip",
-        "site-packages",
-        "semi-standalone",
-        "alias",
-        "use-pythonpath",
-        "debug-modulegraph",
-        "debug-skip-macholib",
-    ]
-
-    def initialize_options(self):
-        self.plugin = None
-        self.bdist_base = None
-        self.optimize = 0
-        self.no_strip = False
-        self.iconfile = None
-        self.alias = 0
-        self.argv_inject = None
-        self.site_packages = False
-        self.use_pythonpath = False
-        self.includes = None
-        self.packages = None
-        self.excludes = None
-        self.dylib_excludes = None
-        self.frameworks = None
-        self.resources = None
-        self.plist = None
-        self.semi_standalone = is_system()
-        self.dist_dir = None
-        self.debug_skip_macholib = False
-        self.debug_modulegraph = False
-        self.filters = []
+def build_plugin(main_script_path, **options):
+    opts = Options(main_script_path, **options)
+    folders = Folders(opts.dist_dir, opts.bdist_base, opts.semi_standalone)
+    builder = PluginBuilder(folders, opts)
+    builder.fixup_distribution()
+    builder.initialize_plist()
     
-    def finalize_options(self):
-        self.optimize = int(self.optimize)
-        if self.argv_inject and isinstance(self.argv_inject, str):
-            self.argv_inject = shlex.split(self.argv_inject)
-        self.includes = set(fancy_split(self.includes))
-        self.includes.add('encodings.*')
-        self.packages = set(fancy_split(self.packages))
-        self.excludes = set(fancy_split(self.excludes))
-        self.excludes.add('readline')
-        # included by apptemplate
-        self.excludes.add('site')
-        dylib_excludes = fancy_split(self.dylib_excludes)
-        self.dylib_excludes = []
-        for fn in dylib_excludes:
-            try:
-                res = macholib.dyld.framework_find(fn)
-            except ValueError:
-                try:
-                    res = macholib.dyld.dyld_find(fn)
-                except ValueError:
-                    res = fn
-            self.dylib_excludes.append(res)
-        self.resources = fancy_split(self.resources)
-        frameworks = fancy_split(self.frameworks)
-        self.frameworks = []
-        for fn in frameworks:
-            try:
-                res = macholib.dyld.framework_find(fn)
-            except ValueError:
-                res = macholib.dyld.dyld_find(fn)
-            while res in self.dylib_excludes:
-                self.dylib_excludes.remove(res)
-            self.frameworks.append(res)
-        if not self.plist:
-            self.plist = {}
-        if isinstance(self.plist, str):
-            self.plist = plistlib.Plist.fromFile(self.plist)
-        if isinstance(self.plist, plistlib.Dict):
-            self.plist = dict(self.plist.__dict__)
+    sys_old_path = sys.path[:]
+    extra_paths = [os.path.dirname(opts.target.script)]
+    opts.additional_paths = [os.path.abspath(p) for p in extra_paths if p is not None]
+    sys.path[:0] = opts.additional_paths
+
+    # this needs additional_paths
+    builder.initialize_prescripts()
+
+    try:
+        if opts.alias:
+            builder.run_alias()
         else:
-            self.plist = dict(self.plist)
-
-        self.set_undefined_options('bdist',
-                                   ('dist_dir', 'dist_dir'),
-                                   ('bdist_base', 'bdist_base'))
-
-        if self.semi_standalone:
-            self.filters.append(not_stdlib_filter)
-
-        if self.iconfile is None and 'CFBundleIconFile' not in self.plist:
-            # Default is the generic applet icon in the framework
-            iconfile = os.path.join(sys.prefix, 'Resources', 'Python.app',
-                'Contents', 'Resources', 'PythonApplet.icns')
-            if os.path.exists(iconfile):
-                self.iconfile = iconfile
-    
-    def run(self):
-        build = self.reinitialize_command('build')
-        build.build_base = self.bdist_base
-        build.run()
-        self.folders = Folders(self.dist_dir, self.bdist_base, self.semi_standalone)
-        self.builder = PluginBuilder(self.folders, self)
-        self.builder.fixup_distribution()
-        self.builder.initialize_plist()
-
-        sys_old_path = sys.path[:]
-        extra_paths = [os.path.dirname(self.target.script)]
-        extra_paths.extend([build.build_platlib, build.build_lib])
-        self.additional_paths = [os.path.abspath(p) for p in extra_paths if p is not None]
-        sys.path[:0] = self.additional_paths
-
-        # this needs additional_paths
-        self.builder.initialize_prescripts()
-
-        try:
-            if self.alias:
-                self.builder.run_alias()
-            else:
-                self.builder.run_normal()
-        finally:
-            sys.path = sys_old_path
-    
+            builder.run_normal()
+    finally:
+        sys.path = sys_old_path

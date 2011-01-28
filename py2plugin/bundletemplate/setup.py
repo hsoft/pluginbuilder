@@ -47,14 +47,20 @@ ARCH_BUILD_FLAGS = {
     },
 }
 
+def main_executable_path():
+    basepath = os.path.dirname(__file__)
+    return os.path.join(basepath, 'prebuilt', 'main')
 
 def main():
     basepath = os.path.dirname(__file__)
+    dest = main_executable_path()
+    src = os.path.join(basepath, 'src', 'main.m')
+    if os.path.exists(dest) and (os.stat(dest).st_mtime < os.stat(src).st_mtime):
+        return dest
+
     builddir = os.path.join(basepath, 'prebuilt')
     if not os.path.exists(builddir):
         os.makedirs(builddir)
-    src = os.path.join(basepath, 'src', 'main.m')
-
     cfg = distutils.sysconfig.get_config_vars()
 
     BASE_CFLAGS = cfg['CFLAGS']
@@ -81,12 +87,7 @@ def main():
     CC=arch_flags['cc']
     CFLAGS = BASE_CFLAGS + ' ' + arch_flags['cflags']
     os.environ['MACOSX_DEPLOYMENT_TARGET'] = arch_flags['target']
-    dest = os.path.join(builddir, 'main')
-    if not os.path.exists(dest) or (
-            os.stat(dest).st_mtime < os.stat(src).st_mtime):
-        os.system('"%(CC)s" -o "%(dest)s" "%(src)s" %(CFLAGS)s' % locals())
-
-    dest = os.path.join(builddir, 'main')
+    os.system('"%(CC)s" -o "%(dest)s" "%(src)s" %(CFLAGS)s' % locals())
     return dest
 
 

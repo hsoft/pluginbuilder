@@ -26,7 +26,7 @@ def create_pluginbundle(destdir, name, extension='.plugin', module=py2plugin.bun
     for d in dirs:
         makedirs(d)
     plist.write(plistPath)
-    srcmain = module.setup.main()
+    srcmain = module.setup.main_executable_path()
     destmain = os.path.join(platdir, kw['CFBundleExecutable'])
     open(os.path.join(contents, 'PkgInfo'), 'w').write(
         kw['CFBundlePackageType'] + kw['CFBundleSignature']

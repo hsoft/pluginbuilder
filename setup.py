@@ -13,12 +13,10 @@ from setuptools import setup, find_packages
 LONG_DESCRIPTION = open('README.txt').read()
 
 CLASSIFIERS = [
-        'Development Status :: 4 - Beta',
         'Environment :: Console',
         'Environment :: MacOS X :: Cocoa',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: MIT License',
-        'Natural Language :: English',
         'Operating System :: MacOS :: MacOS X',
         'Programming Language :: Python',
         'Programming Language :: Python :: 3.2',
@@ -57,12 +55,6 @@ setup(
             'src/main.m',
         ],
     },
-    entry_points={
-        'distutils.commands': [
-            "py2plugin = py2plugin.build_app:py2plugin",
-        ],
-    },
     zip_safe=False,
-    dependency_links=[],
     test_suite='py2plugin_tests',
 )
