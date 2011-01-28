@@ -329,6 +329,160 @@ def filter_dependencies(mf, filters):
     print('%d orphaned' % (nodes_orphaned,))
     print('%d remaining' % (nodes_seen - nodes_removed,))
 
+class Folders:
+    def __init__(self, dist_dir, bdist_base, semi_standalone):
+        bdistdir_fmt = 'python%s-semi_standalone' if semi_standalone else 'python%s-standalone'
+        self.bdist_dir = os.path.join(bdist_base, bdistdir_fmt % (sys.version[:3],), 'app')
+        
+        self.collect_dir = os.path.abspath(os.path.join(self.bdist_dir, "collect"))
+        mkpath(self.collect_dir)
+        
+        self.temp_dir = os.path.abspath(os.path.join(self.bdist_dir, "temp"))
+        mkpath(self.temp_dir)
+        
+        self.dist_dir = os.path.abspath(dist_dir)
+        mkpath(self.dist_dir)
+        
+        self.ext_dir = os.path.join(self.bdist_dir, 'lib-dynload')
+        mkpath(self.ext_dir)
+        
+        self.framework_dir = os.path.join(self.bdist_dir, 'Frameworks')
+        mkpath(self.framework_dir)
+    
+
+class PluginBuilder:
+    def __init__(self, folders, opts):
+        self.folders = folders
+        self.opts = opts
+    
+    def iter_data_files(self):
+        dist = self.opts.distribution
+        allres = chain(getattr(dist, 'data_files', ()) or (), self.opts.resources)
+        for (path, files) in map(normalize_data_file, allres):
+            for fn in files:
+                yield fn, os.path.join(path, os.path.basename(fn))
+    
+    def build_executable(self, target, pkgexts, copyexts, script):
+        # Build an executable for the target
+        appdir, resdir, plist = create_bundle(target, script, self.folders.dist_dir, self.opts.plist,
+            self.opts.runtime_preferences)
+        self.opts.appdir = appdir
+        self.opts.resdir = resdir
+        self.opts.plist = plist
+
+        for src, dest in self.iter_data_files():
+            dest = os.path.join(resdir, dest)
+            mkpath(os.path.dirname(dest))
+            copy_resource(src, dest, dry_run=self.opts.dry_run)
+
+        bootfn = '__boot__'
+        bootfile = open(os.path.join(resdir, bootfn + '.py'), 'w')
+        for fn in target.prescripts:
+            bootfile.write(get_bootstrap_data(fn))
+            bootfile.write('\n\n')
+        bootfile.write('_run(%r)\n' % (os.path.basename(script),))
+        bootfile.close()
+
+        copy_file(script, resdir)
+        pydir = os.path.join(resdir, 'lib', 'python' + sys.version[:3])
+        mkpath(pydir)
+        force_symlink('../../site.py', os.path.join(pydir, 'site.py'))
+        realcfg = os.path.dirname(sysconfig.get_makefile_filename())
+        cfgdir = os.path.join(resdir, os.path.relpath(realcfg, sys.prefix))
+        real_include = os.path.join(sys.prefix, 'include')
+        if self.opts.semi_standalone:
+            force_symlink(realcfg, cfgdir)
+            force_symlink(real_include, os.path.join(resdir, 'include'))
+        else:
+            mkpath(cfgdir)
+            for fn in 'Makefile', 'Setup', 'Setup.local', 'Setup.config':
+                rfn = os.path.join(realcfg, fn)
+                if os.path.exists(rfn):
+                    copy_file(rfn, os.path.join(cfgdir, fn))
+
+            # see copy_python_framework() for explanation.
+            pyconfig_path = sysconfig.get_config_h_filename()
+            pyconfig_path_relative = os.path.relpath(os.path.dirname(pyconfig_path), sys.prefix)
+            inc_dir = os.path.join(resdir, pyconfig_path_relative)
+            mkpath(inc_dir)
+            copy_file(pyconfig_path, os.path.join(inc_dir, 'pyconfig.h'))
+
+
+        copy_tree(self.folders.collect_dir, pydir)
+        
+        ext_dir = os.path.join(pydir, os.path.basename(self.folders.ext_dir))
+        copy_tree(self.folders.ext_dir, ext_dir, preserve_symlinks=True)
+        copy_tree(self.folders.framework_dir, os.path.join(appdir, 'Contents', 'Frameworks'), 
+            preserve_symlinks=True)
+        for pkg in self.opts.packages:
+            pkg = get_bootstrap(pkg)
+            dst = os.path.join(pydir, os.path.basename(pkg))
+            mkpath(dst)
+            copy_tree(pkg, dst)
+        for copyext in copyexts:
+            fn = os.path.join(ext_dir,
+                (copyext.identifier.replace('.', os.sep) +
+                os.path.splitext(copyext.filename)[1])
+            )
+            mkpath(os.path.dirname(fn))
+            copy_file_data(copyext.filename, fn, dry_run=self.opts.dry_run)
+
+        target.appdir = appdir
+        return appdir
+    
+    def build_alias_executable(self, target, script):
+        # Build an alias executable for the target
+        appdir, resdir, plist = create_bundle(target, script, self.folders.dist_dir, self.opts.plist, self.opts.runtime_preferences)
+
+        # symlink python executable
+        execdst = os.path.join(appdir, 'Contents', 'MacOS', 'python')
+        prefixPathExecutable = os.path.join(sys.prefix, 'bin', 'python')
+        if os.path.exists(prefixPathExecutable):
+            pyExecutable = prefixPathExecutable
+        else:
+            pyExecutable = sys.executable
+        force_symlink(pyExecutable, execdst)
+
+        # make PYTHONHOME
+        pyhome = os.path.join(resdir, 'lib', 'python' + sys.version[:3])
+        realhome = os.path.join(sys.prefix, 'lib', 'python' + sys.version[:3])
+        makedirs(pyhome)
+        force_symlink('../../site.py', os.path.join(pyhome, 'site.py'))
+        force_symlink(os.path.join(realhome, 'config'), os.path.join(pyhome, 'config'))
+        
+        # symlink data files
+        # XXX: fixme: need to integrate automatic data conversion
+        for src, dest in self.iter_data_files():
+            dest = os.path.join(resdir, dest)
+            if src == dest:
+                continue
+            makedirs(os.path.dirname(dest))
+            force_symlink(os.path.abspath(src), dest)
+
+        # symlink frameworks
+        for src in iter_frameworks(self.opts.frameworks):
+            dest = os.path.join(
+                appdir, 'Contents', 'Frameworks', os.path.basename(src))
+            if src == dest:
+                continue
+            makedirs(os.path.dirname(dest))
+            force_symlink(os.path.abspath(src), dest)
+
+        bootfn = '__boot__'
+        bootfile = open(os.path.join(resdir, bootfn + '.py'), 'w')
+        for fn in target.prescripts:
+            bootfile.write(get_bootstrap_data(fn))
+            bootfile.write('\n\n')
+        bootfile.write('try:\n')
+        bootfile.write('    _run(%r)\n' % os.path.realpath(script))
+        bootfile.write('except KeyboardInterrupt:\n')
+        bootfile.write('    pass\n')
+        bootfile.close()
+
+        target.appdir = appdir
+        return appdir
+    
+
 class py2plugin(Command):
     description = "create a Mac OS X application or plugin from Python scripts"
     # List of option tuples: long name, short name (None if no short
@@ -389,7 +543,6 @@ class py2plugin(Command):
     ]
 
     def initialize_options(self):
-        self.app = None
         self.plugin = None
         self.bdist_base = None
         self.optimize = 0
@@ -526,7 +679,8 @@ class py2plugin(Command):
         build = self.reinitialize_command('build')
         build.build_base = self.bdist_base
         build.run()
-        self.create_directories()
+        self.folders = Folders(self.dist_dir, self.bdist_base, self.semi_standalone)
+        self.builder = PluginBuilder(self.folders, self)
         self.fixup_distribution()
         self.initialize_plist()
 
@@ -547,13 +701,6 @@ class py2plugin(Command):
         finally:
             sys.path = sys_old_path
 
-
-    def iter_data_files(self):
-        dist = self.distribution
-        allres = chain(getattr(dist, 'data_files', ()) or (), self.resources)
-        for (path, files) in map(normalize_data_file, allres):
-            for fn in files:
-                yield fn, os.path.join(path, os.path.basename(fn))
     
     def get_plist_options(self):
         return dict(
@@ -631,35 +778,10 @@ class py2plugin(Command):
 
         filter_dependencies(mf, filters)
 
-        py_files, extensions = finalize_modulefinder(mf, self.temp_dir)
+        py_files, extensions = finalize_modulefinder(mf, self.folders.temp_dir)
         pkgdirs = collect_packagedirs(self.packages)
         self.create_binaries(py_files, pkgdirs, extensions, loader_files)
     
-    def create_directories(self):
-        bdist_base = self.bdist_base
-        if self.semi_standalone:
-            self.bdist_dir = os.path.join(bdist_base,
-                'python%s-semi_standalone' % (sys.version[:3],), 'app')
-        else:
-            self.bdist_dir = os.path.join(bdist_base,
-                'python%s-standalone' % (sys.version[:3],), 'app')
-
-        self.collect_dir = os.path.abspath(
-            os.path.join(self.bdist_dir, "collect"))
-        self.mkpath(self.collect_dir)
-
-        self.temp_dir = os.path.abspath(os.path.join(self.bdist_dir, "temp"))
-        self.mkpath(self.temp_dir)
-
-        self.dist_dir = os.path.abspath(self.dist_dir)
-        self.mkpath(self.dist_dir)
-
-        self.ext_dir = os.path.join(self.bdist_dir, 'lib-dynload')
-        self.mkpath(self.ext_dir)
-
-        self.framework_dir = os.path.join(self.bdist_dir, 'Frameworks')
-        self.mkpath(self.framework_dir)
-
     def create_binaries(self, py_files, pkgdirs, extensions, loader_files):
         print("*** create binaries ***")
         pkgexts = []
@@ -682,14 +804,14 @@ class py2plugin(Command):
                 pkgexts.append(ext)
             else:
                 if '.' in ext.identifier:
-                    py_files.append(create_loader(ext, self.temp_dir, self.verbose, self.dry_run))
+                    py_files.append(create_loader(ext, self.folders.temp_dir, self.verbose, self.dry_run))
                 copyexts.append(ext)
             extmap[fn] = ext
 
         # byte compile the python modules into the target directory
         print("*** byte compile python files ***")
         byte_compile(py_files,
-                     target_dir=self.collect_dir,
+                     target_dir=self.folders.collect_dir,
                      optimize=self.optimize,
                      force=True,
                      verbose=self.verbose,
@@ -697,13 +819,13 @@ class py2plugin(Command):
 
         for item in py_files:
             if not isinstance(item, Package): continue
-            copy_package_data(item, self.collect_dir)
+            copy_package_data(item, self.folders.collect_dir)
 
         self.lib_files = []
         self.app_files = []
 
         for path, files in loader_files:
-            dest = os.path.join(self.collect_dir, path)
+            dest = os.path.join(self.folders.collect_dir, path)
             self.mkpath(dest)
             for fn in files:
                 destfn = os.path.join(dest, os.path.basename(fn))
@@ -714,7 +836,7 @@ class py2plugin(Command):
 
         # build the executables
         target = self.target
-        dst = self.build_executable(target, pkgexts, copyexts, target.script)
+        dst = self.builder.build_executable(target, pkgexts, copyexts, target.script)
         exp = os.path.join(dst, 'Contents', 'MacOS')
         execdst = os.path.join(exp, 'python')
         if self.semi_standalone:
@@ -773,7 +895,7 @@ class py2plugin(Command):
         if os.path.isabs(app_dir):
             raise DistutilsOptionError(
                   "app directory must be relative: %s" % (app_dir,))
-        self.app_dir = os.path.join(self.dist_dir, app_dir)
+        self.app_dir = os.path.join(self.folders.dist_dir, app_dir)
         self.mkpath(self.app_dir)
 
     def initialize_prescripts(self):
@@ -805,122 +927,3 @@ class py2plugin(Command):
         prescripts = self.target.prescripts
         self.target.prescripts = newprescripts + prescripts
     
-    def build_alias_executable(self, target, script):
-        # Build an alias executable for the target
-        appdir, resdir, plist = create_bundle(target, script, self.dist_dir, self.plist, self.runtime_preferences)
-
-        # symlink python executable
-        execdst = os.path.join(appdir, 'Contents', 'MacOS', 'python')
-        prefixPathExecutable = os.path.join(sys.prefix, 'bin', 'python')
-        if os.path.exists(prefixPathExecutable):
-            pyExecutable = prefixPathExecutable
-        else:
-            pyExecutable = sys.executable
-        force_symlink(pyExecutable, execdst)
-
-        # make PYTHONHOME
-        pyhome = os.path.join(resdir, 'lib', 'python' + sys.version[:3])
-        realhome = os.path.join(sys.prefix, 'lib', 'python' + sys.version[:3])
-        makedirs(pyhome)
-        force_symlink('../../site.py', os.path.join(pyhome, 'site.py'))
-        force_symlink(os.path.join(realhome, 'config'), os.path.join(pyhome, 'config'))
-        
-        # symlink data files
-        # XXX: fixme: need to integrate automatic data conversion
-        for src, dest in self.iter_data_files():
-            dest = os.path.join(resdir, dest)
-            if src == dest:
-                continue
-            makedirs(os.path.dirname(dest))
-            force_symlink(os.path.abspath(src), dest)
-
-        # symlink frameworks
-        for src in iter_frameworks(self.frameworks):
-            dest = os.path.join(
-                appdir, 'Contents', 'Frameworks', os.path.basename(src))
-            if src == dest:
-                continue
-            makedirs(os.path.dirname(dest))
-            force_symlink(os.path.abspath(src), dest)
-
-        bootfn = '__boot__'
-        bootfile = open(os.path.join(resdir, bootfn + '.py'), 'w')
-        for fn in target.prescripts:
-            bootfile.write(get_bootstrap_data(fn))
-            bootfile.write('\n\n')
-        bootfile.write('try:\n')
-        bootfile.write('    _run(%r)\n' % os.path.realpath(script))
-        bootfile.write('except KeyboardInterrupt:\n')
-        bootfile.write('    pass\n')
-        bootfile.close()
-
-        target.appdir = appdir
-        return appdir
-
-    def build_executable(self, target, pkgexts, copyexts, script):
-        # Build an executable for the target
-        appdir, resdir, plist = create_bundle(target, script, self.dist_dir, self.plist, self.runtime_preferences)
-        self.appdir = appdir
-        self.resdir = resdir
-        self.plist = plist
-
-        for src, dest in self.iter_data_files():
-            dest = os.path.join(resdir, dest)
-            self.mkpath(os.path.dirname(dest))
-            copy_resource(src, dest, dry_run=self.dry_run)
-
-        bootfn = '__boot__'
-        bootfile = open(os.path.join(resdir, bootfn + '.py'), 'w')
-        for fn in target.prescripts:
-            bootfile.write(get_bootstrap_data(fn))
-            bootfile.write('\n\n')
-        bootfile.write('_run(%r)\n' % (os.path.basename(script),))
-        bootfile.close()
-
-        self.copy_file(script, resdir)
-        pydir = os.path.join(resdir, 'lib', 'python' + sys.version[:3])
-        self.mkpath(pydir)
-        force_symlink('../../site.py', os.path.join(pydir, 'site.py'))
-        realcfg = os.path.dirname(sysconfig.get_makefile_filename())
-        cfgdir = os.path.join(resdir, os.path.relpath(realcfg, sys.prefix))
-        real_include = os.path.join(sys.prefix, 'include')
-        if self.semi_standalone:
-            force_symlink(realcfg, cfgdir)
-            force_symlink(real_include, os.path.join(resdir, 'include'))
-        else:
-            self.mkpath(cfgdir)
-            for fn in 'Makefile', 'Setup', 'Setup.local', 'Setup.config':
-                rfn = os.path.join(realcfg, fn)
-                if os.path.exists(rfn):
-                    self.copy_file(rfn, os.path.join(cfgdir, fn))
-
-            # see copy_python_framework() for explanation.
-            pyconfig_path = sysconfig.get_config_h_filename()
-            pyconfig_path_relative = os.path.relpath(os.path.dirname(pyconfig_path), sys.prefix)
-            inc_dir = os.path.join(resdir, pyconfig_path_relative)
-            self.mkpath(inc_dir)
-            self.copy_file(pyconfig_path, os.path.join(inc_dir, 'pyconfig.h'))
-
-
-        copy_tree(self.collect_dir, pydir)
-        
-        ext_dir = os.path.join(pydir, os.path.basename(self.ext_dir))
-        copy_tree(self.ext_dir, ext_dir, preserve_symlinks=True)
-        copy_tree(self.framework_dir, os.path.join(appdir, 'Contents', 'Frameworks'), 
-            preserve_symlinks=True)
-        for pkg in self.packages:
-            pkg = get_bootstrap(pkg)
-            dst = os.path.join(pydir, os.path.basename(pkg))
-            self.mkpath(dst)
-            copy_tree(pkg, dst)
-        for copyext in copyexts:
-            fn = os.path.join(ext_dir,
-                (copyext.identifier.replace('.', os.sep) +
-                os.path.splitext(copyext.filename)[1])
-            )
-            self.mkpath(os.path.dirname(fn))
-            copy_file_data(copyext.filename, fn, dry_run=self.dry_run)
-
-        target.appdir = appdir
-        return appdir
-
