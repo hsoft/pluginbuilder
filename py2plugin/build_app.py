@@ -55,6 +55,8 @@ def iterRecipes(module=recipes):
 class Target:
     def __init__(self, script):
         self.script = script
+        self.plist = {}
+        self.prescripts = []
     
     def get_dest_base(self):
         return os.path.basename(os.path.splitext(self.script)[0])
@@ -292,16 +294,10 @@ def collect_packagedirs(packages):
         for pkg in packages
     ]))
 
-def collect_scripts(targets):
+def collect_scripts(target):
     # these contains file names
-    scripts = set()
-
-    for target in targets:
-        scripts.add(target.script)
-        scripts.update([
-            k for k in target.prescripts if isinstance(k, str)
-        ])
-
+    scripts = {target.script,}
+    scripts.update(k for k in target.prescripts if isinstance(k, str))
     return scripts
 
 def collect_filters(filters):
@@ -476,9 +472,8 @@ class py2plugin(Command):
 
 
     def get_default_plist(self):
-        # XXX - this is all single target stuff
         plist = {}
-        target = self.targets[0]
+        target = self.target
 
         version = self.distribution.get_version()
         plist['CFBundleVersion'] = version
@@ -536,16 +531,9 @@ class py2plugin(Command):
         self.initialize_plist()
 
         sys_old_path = sys.path[:]
-        extra_paths = [
-            os.path.dirname(target.script)
-            for target in self.targets
-        ]
+        extra_paths = [os.path.dirname(self.target.script)]
         extra_paths.extend([build.build_platlib, build.build_lib])
-        self.additional_paths = [
-            os.path.abspath(p)
-            for p in extra_paths
-            if p is not None
-        ]
+        self.additional_paths = [os.path.abspath(p) for p in extra_paths if p is not None]
         sys.path[:0] = self.additional_paths
 
         # this needs additional_paths
@@ -580,8 +568,7 @@ class py2plugin(Command):
     
     def initialize_plist(self):
         plist = self.get_default_plist()
-        for target in self.targets:
-            plist.update(getattr(target, 'plist', {}))
+        plist.update(self.target.plist)
         plist.update(self.plist)
         plist.update(self.get_plist_options())
 
@@ -599,9 +586,8 @@ class py2plugin(Command):
 
     def run_alias(self):
         self.app_files = []
-        for target in self.targets:
-            dst = self.build_alias_executable(target, target.script)
-            self.app_files.append(dst)
+        dst = self.build_alias_executable(self.target, self.target.script)
+        self.app_files.append(dst)
     
     def process_recipes(self, mf, filters, flatpackages, loader_files):
         rdict = dict(iterRecipes())
@@ -625,15 +611,14 @@ class py2plugin(Command):
                 for fn in newbootstraps:
                     if isinstance(fn, str):
                         mf.run_script(fn)
-                for target in self.targets:
-                    target.prescripts.extend(newbootstraps)
+                self.target.prescripts.extend(newbootstraps)
                 break
             else:
                 break
     
     def run_normal(self):
         debug = 4 if self.debug_modulegraph else 0
-        mf = find_modules(scripts=collect_scripts(self.targets), includes=self.includes,
+        mf = find_modules(scripts=collect_scripts(self.target), includes=self.includes,
             packages=self.packages, excludes=self.excludes, debug=debug)
         filters = collect_filters(self.filters)
         flatpackages = {}
@@ -728,46 +713,46 @@ class py2plugin(Command):
                     self.copy_file(fn, destfn)
 
         # build the executables
-        for target in self.targets:
-            dst = self.build_executable(target, pkgexts, copyexts, target.script)
-            exp = os.path.join(dst, 'Contents', 'MacOS')
-            execdst = os.path.join(exp, 'python')
-            if self.semi_standalone:
-                force_symlink(sys.executable, execdst)
+        target = self.target
+        dst = self.build_executable(target, pkgexts, copyexts, target.script)
+        exp = os.path.join(dst, 'Contents', 'MacOS')
+        execdst = os.path.join(exp, 'python')
+        if self.semi_standalone:
+            force_symlink(sys.executable, execdst)
+        else:
+            if os.path.exists(os.path.join(sys.prefix, ".Python")):
+                fn = os.path.join(sys.prefix, "lib", "python%d.%d"%(sys.version_info[:2]), "orig-prefix.txt")
+                if os.path.exists(fn):
+                    prefix = open(fn, 'rU').read().strip()
+
+                rest_path = sys.executable[len(sys.prefix)+1:]
+                if rest_path.startswith('.'):
+                    rest_path = rest_path[1:]
+
+                print("XXXX", os.path.join(prefix, rest_path))
+                self.copy_file(os.path.join(prefix, rest_path), execdst)
+
             else:
-                if os.path.exists(os.path.join(sys.prefix, ".Python")):
-                    fn = os.path.join(sys.prefix, "lib", "python%d.%d"%(sys.version_info[:2]), "orig-prefix.txt")
-                    if os.path.exists(fn):
-                        prefix = open(fn, 'rU').read().strip()
-
-                    rest_path = sys.executable[len(sys.prefix)+1:]
-                    if rest_path.startswith('.'):
-                        rest_path = rest_path[1:]
-
-                    print("XXXX", os.path.join(prefix, rest_path))
-                    self.copy_file(os.path.join(prefix, rest_path), execdst)
-
-                else:
-                    self.copy_file(sys.executable, execdst)
-            if not self.debug_skip_macholib:
-                mm = PythonStandalone(dst, executable_path=exp)
-                dylib, runtime = self.get_runtime()
-                if self.semi_standalone:
-                    mm.excludes.append(runtime)
-                else:
-                    mm.mm.run_file(runtime)
-                for exclude in self.dylib_excludes:
-                    info = macholib.dyld.framework_info(exclude)
-                    if info is not None:
-                        exclude = os.path.join(
-                            info['location'], info['shortname'] + '.framework')
-                    mm.excludes.append(exclude)
-                for fmwk in self.frameworks:
-                    mm.mm.run_file(fmwk)
-                platfiles = mm.run()
-                if not self.no_strip and not self.dry_run:
-                    platfiles = strip_dsym(platfiles, self.appdir)
-                    strip_files_and_report(platfiles, self.verbose)
+                self.copy_file(sys.executable, execdst)
+        if not self.debug_skip_macholib:
+            mm = PythonStandalone(dst, executable_path=exp)
+            dylib, runtime = self.get_runtime()
+            if self.semi_standalone:
+                mm.excludes.append(runtime)
+            else:
+                mm.mm.run_file(runtime)
+            for exclude in self.dylib_excludes:
+                info = macholib.dyld.framework_info(exclude)
+                if info is not None:
+                    exclude = os.path.join(
+                        info['location'], info['shortname'] + '.framework')
+                mm.excludes.append(exclude)
+            for fmwk in self.frameworks:
+                mm.mm.run_file(fmwk)
+            platfiles = mm.run()
+            if not self.no_strip and not self.dry_run:
+                platfiles = strip_dsym(platfiles, self.appdir)
+                strip_files_and_report(platfiles, self.verbose)
             self.app_files.append(dst)
     
     def fixup_distribution(self):
@@ -781,32 +766,15 @@ class py2plugin(Command):
             plugin = self.plugin
 
         # Convert our args into target objects.
-        self.targets = [Target(script) for script in plugin]
-        if len(self.targets) != 1:
-            # XXX - support multiple targets?
-            raise DistutilsOptionError("Multiple targets not currently supported")
+        self.target = Target(plugin[0])
 
-        # make sure all targets use the same directory, this is
         # also the directory where the pythonXX.dylib must reside
-        paths = set()
-        for target in self.targets:
-            paths.add(os.path.dirname(target.get_dest_base()))
-
-        if len(paths) > 1:
+        app_dir = os.path.dirname(self.target.get_dest_base())
+        if os.path.isabs(app_dir):
             raise DistutilsOptionError(
-                  "all targets must use the same directory: %s" %
-                  ([p for p in paths],))
-        if paths:
-            app_dir = paths.pop() # the only element
-            if os.path.isabs(app_dir):
-                raise DistutilsOptionError(
-                      "app directory must be relative: %s" % (app_dir,))
-            self.app_dir = os.path.join(self.dist_dir, app_dir)
-            self.mkpath(self.app_dir)
-        else:
-            # Do we allow to specify no targets?
-            # We can at least build a zipfile...
-            self.app_dir = self.bdist_dir
+                  "app directory must be relative: %s" % (app_dir,))
+        self.app_dir = os.path.join(self.dist_dir, app_dir)
+        self.mkpath(self.app_dir)
 
     def initialize_prescripts(self):
         prescripts = []
@@ -834,9 +802,8 @@ class py2plugin(Command):
             else:
                 newprescripts.append(s)
 
-        for target in self.targets:
-            prescripts = getattr(target, 'prescripts', [])
-            target.prescripts = newprescripts + prescripts
+        prescripts = self.target.prescripts
+        self.target.prescripts = newprescripts + prescripts
     
     def build_alias_executable(self, target, script):
         # Build an alias executable for the target
@@ -856,10 +823,7 @@ class py2plugin(Command):
         realhome = os.path.join(sys.prefix, 'lib', 'python' + sys.version[:3])
         makedirs(pyhome)
         force_symlink('../../site.py', os.path.join(pyhome, 'site.py'))
-        force_symlink(
-            os.path.join(realhome, 'config'),
-            os.path.join(pyhome, 'config'))
-            
+        force_symlink(os.path.join(realhome, 'config'), os.path.join(pyhome, 'config'))
         
         # symlink data files
         # XXX: fixme: need to integrate automatic data conversion
