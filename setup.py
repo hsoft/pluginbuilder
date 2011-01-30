@@ -62,6 +62,7 @@ setup(
             'src/main.m',
         ],
     },
+    scripts=['bin/py2plugin'],
     zip_safe=False,
     cmdclass={'build_py': build_py},
 )

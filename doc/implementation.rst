@@ -3,7 +3,7 @@ Implementation Details
 
 For those interested in the implementation of py2plugin, here's a quick
 rundown of what happens. The main function of the building process is
-``py2plugin.build_app.build_plugin()``.
+``py2plugin.build_plugin.build_plugin()``.
 
 
 Argument Parsing

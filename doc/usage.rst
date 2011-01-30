@@ -19,10 +19,10 @@ Argument Formatting
 Although the argument used by command line and direct invocation are the same, they're formatted
 differently. The boolean flags are turned on with ``--argname`` if their default value is off, and
 turned off with ``--no-argname`` if their default value is on. Arguments receiving a value (anything
-not boolean) are give in the ``--argname=value`` format. If the argument receives a list, it must be
-given in the ``--argname=item1,item2`` format. As with any command line, if the argument value
-contains a space character, then the value should be "quoted". Arguments having underscores ("_")
-in their name have them replaced by dashes ("-") for command line invocation.
+not boolean) are give in the ``--argname value`` format. If the argument receives a list, it must be
+given in the ``--argname item1 item2`` format. If the argument value contains a space character,
+then the value should be "quoted" (Example: ``--argname item1 "item 2"``. Arguments having
+underscores ("_") in their name have them replaced by dashes ("-") for command line invocation.
 
 Argument List
 -------------

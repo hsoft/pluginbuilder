@@ -1,0 +1,73 @@
+#!/usr/bin/env python
+
+import sys
+import argparse
+
+from py2plugin.build_plugin import build_plugin
+
+# argparse's Namespace doesn't seem to support getting arguments as a dictionary. It has the
+# "_get_kwargs()" method, but it's a private method and it's not a good idea to rely on it. The
+# reason for this namespace is just to not have to repeat the list of arguments when comes the time
+# to call build_plugin.
+class DictNamespace:
+    def __init__(self):
+        self.kwargs = {}
+    
+    def __setattr__(self, key, value):
+        if key != 'kwargs':
+            self.kwargs[key] = value
+        else:
+            object.__setattr__(self, key, value)
+    
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Create standalone Mac OS X plugins.')
+    parser.add_argument('main_script_path')
+    parser.add_argument('--includes', nargs='+',
+        help="A list of modules to include")
+    parser.add_argument('--packages', nargs='+',
+        help="A list of packages to include")
+    parser.add_argument('--excludes', nargs='+',
+        help="A list of packages to excludes")
+    parser.add_argument('--dylib-excludes', nargs='+',
+        help="A list of frameworks or dylibs to exclude")
+    parser.add_argument('--resources', nargs='+',
+        help="A list of resources to include in your plugin")
+    parser.add_argument('--frameworks', nargs='+',
+        help="A list of frameworks or dylibs to include")
+    parser.add_argument('--plist', nargs=1,
+        help="The path to a Info.plist template to use instead of the default one")
+    parser.add_argument('--argv-inject', nargs=1,
+        help="Inject some commands into the argv")
+    parser.add_argument('--bdist-base', nargs=1,
+        help="The folder which will be used by py2plugin to build the plugin (in short, a temp dir)")
+    parser.add_argument('--dist-dir', nargs=1,
+        help="The folder in which the finished plugin will be put")
+    parser.add_argument('--optimize', nargs=1, type=int,
+        help="The level of optimization to byte-compile python scripts with [Default: 0]")
+    parser.add_argument('--no-strip', dest='strip', action='store_false', default=None,
+        help="Don't strip debug and local symbols from output")
+    parser.add_argument('--alias', action='store_true', default=None,
+        help="Instead of copying stuff in the plugin, make symlinks instead")
+    parser.add_argument('--use-pythonpath', action='store_true', default=None,
+        help="Allow PYTHONPATH to effect the interpreter's environment")
+    parser.add_argument('--site-package', action='store_true', default=None,
+        help="Include the whole system's site-package in the plugin")
+    parser.add_argument('--verbose', action='store_true', default=None,
+        help="Verbose output")
+    parser.add_argument('--dry-run', action='store_true', default=None,
+        help="Just pretend to be building, don't copy or symlink anything")
+    parser.add_argument('--debug-modulegraph', action='store_true', default=None,
+        help="Drop to pdb console after the module finding phase is complete")
+    parser.add_argument('--debug-skip-macholib', action='store_true', default=None,
+        help="Skip macholib phase (app will not be standalone!)")
+    return parser.parse_args(namespace=DictNamespace())
+
+def main():
+    args = parse_args()
+    given_args = {key: value for key, value in args.kwargs.items() if value is not None}
+    build_plugin(**given_args)
+    return 0
+
+if __name__ == '__main__':
+    sys.exit(main())
