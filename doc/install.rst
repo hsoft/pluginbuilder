@@ -1,60 +1,46 @@
+Dependencies
+============
+
+Before you can install py2plugin, you'll need to install both XCode and Python 3.2. There are other
+dependencies, but they're automatically installed by `distribute`_:
+
+macholib:
+    `macholib`_ reads and writes the Mach-O object file format. 
+    Used by py2app to build a dependency graph of dyld and framework
+    dependencies for your application, and then to copy them into your
+    application and rewrite their load commands to be ``@executable_path``
+    relative. The end result is that your application is going to be
+    completely standalone beyond a default install of Mac OS X. You no
+    longer have to worry about linking all of your dependencies statically,
+    using `install_name_tool`_, etc. It's all taken care of!
+
+modulegraph:
+    `modulegraph`_ is a replacement for the Python standard library
+    `modulefinder`_. Stores the module dependency tree in a graph data
+    structure and allows for advanced filtering and analysis capabilities,
+    such as `GraphViz`_ dot output.
+
+altgraph:
+    `altgraph`_ is a fork of `Istvan Albert`_'s graphlib, and it used
+    internally by both `macholib`_ and `modulegraph`_. It contains
+    several small feature and performance enhancements over the original
+    graphlib.
+
 Installation
 ============
 
-Installing with easy_install
-----------------------------
-
-To install py2app using `easy_install`_ you must make sure you have a recent
-version of `setuptools`_ installed (as of this writing, 0.6b4 or later)::
-
-    $ curl -O http://peak.telecommunity.com/dist/ez_setup.py
-    $ sudo python ez_setup.py -U setuptools
-
-To install or upgrade to the latest released version of py2app::
-
-    $ sudo easy_install -U py2app
-
-
-Installing from source
-----------------------
-
-To install py2app from source, simply use the normal procedure for
-installing any Python package. Since py2app uses `setuptools`_,
-all dependencies (including `setuptools`_ itself) will be automatically
+To install py2plugin from source, simply use the normal procedure for
+installing any Python package. Since py2plugin uses `distribute`_,
+all dependencies (including `distribute`_ itself) will be automatically
 acquired and installed for you as appropriate::
 
     $ python setup.py install
 
-If you're using a svn checkout, it's recommended to use the `setuptools`_
-`develop command`_, which will simply activate py2app directly from your
-source directory. This way you can do a ``svn up`` or make changes to the
-source code without re-installing every time::
-
-    $ python setup.py develop
-
-
-Upgrade Notes
--------------
-
-The ``setup.py`` template has changed slightly in py2app 0.3 in order
-to accommodate the enhancements brought on by `setuptools`_. Old ``setup.py``
-scripts look like this::
-
-    from distutils.core import setup
-    import py2app
-
-    setup(
-        app=["myscript.py"],
-    )
-
-New py2app scripts should look like this::
-
-    from setuptools import setup
-    setup(
-        app=["myscript.py"],
-	setup_requires=["py2app"],
-    )
-
-.. _`setuptools`: http://pypi.python.org/pypi/setuptools/
-.. _`easy_install`: http://peak.telecommunity.com/DevCenter/EasyInstall
-.. _`develop command`: http://peak.telecommunity.com/DevCenter/setuptools#development-mode
+.. _`macholib`: http://pypi.python.org/pypi/macholib/
+.. _`altgraph`: http://pypi.python.org/pypi/altgraph/
+.. _`modulegraph`: http://pypi.python.org/pypi/modulegraph/
+.. _`install_name_tool`: x-man-page://1/install_name_tool
+.. _`GraphViz`: http://www.research.att.com/sw/tools/graphviz/
+.. _`modulefinder`: http://docs.python.org/lib/module-modulefinder.html
+.. _`Istvan Albert`: http://www.personal.psu.edu/staff/i/u/iua1/
+.. _`distribute`: http://pypi.python.org/pypi/distribute

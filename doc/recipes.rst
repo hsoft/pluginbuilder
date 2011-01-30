@@ -1,13 +1,8 @@
 Recipes
 =======
 
-py2app includes a mechanism for working around package incompatibilities,
+py2plugin includes a mechanism for working around package incompatibilities,
 and stripping unwanted dependencies automatically. These are called recipes.
-
-A future version of py2app will support packaging of `Python Eggs`_. Once
-this is established, recipes will be obsolete since eggs contain all of the
-metadata needed to build a working standalone application.
-
 
 Common causes for incompatibility
 ---------------------------------
@@ -69,13 +64,8 @@ Built-in recipes
 Developing Recipes
 ------------------
 
-py2app currently searches for recipes only in the ``py2app.recipes`` module.
-A recipe is an object that implements a ``check(py2app_cmd, modulegraph)``
-method.
-
-``py2app_cmd``:
-   The py2app command instance (a subclass of ``setuptools.Command``).
-   See the source for ``py2app.build_app`` for reference.
+py2plugin currently searches for recipes only in the ``py2plugin.recipes`` module.
+A recipe is an object that implements a ``check(modulegraph)`` method.
 
 ``modulegraph``:
    The ``modulegraph.modulegraph.ModuleGraph`` instance.
@@ -112,5 +102,3 @@ returned ``dict`` may have any of these optional string keys:
     file names, or file-like objects containing Python code (e.g. StringIO).
     Note that if a file-like object is used, it will not currently be scanned
     for additional dependencies.
-
-.. _`Python Eggs`: http://peak.telecommunity.com/DevCenter/PythonEggs

@@ -12,7 +12,7 @@ from distutils.command.build_py import build_py as _build_py
 from setuptools import setup, find_packages
 from py2plugin import __version__
 
-LONG_DESCRIPTION = open('README.txt').read()
+LONG_DESCRIPTION = open('README').read()
 
 CLASSIFIERS = [
         'Environment :: Console',

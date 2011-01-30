@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# py2app documentation build configuration file, created by
+# py2plugin documentation build configuration file, created by
 # sphinx-quickstart on Sat Jul 31 09:59:24 2010.
 #
 # This file is execfile()d with the current directory set to its containing dir.
@@ -13,21 +13,20 @@
 
 import sys, os
 
+docdir = os.path.dirname(os.path.abspath(__file__))
+
 def get_version():
-    setup_py = os.path.join(os.path.dirname(
-            os.path.dirname(
-                os.path.abspath(__file__))), "setup.py")
-    for ln in open(setup_py, 'rU'):
+    init_py = os.path.join(docdir, '..', 'py2plugin', '__init__.py')
+    for ln in open(init_py, 'rt'):
         ln = ln.strip()
-        if ln.startswith('version='):
+        if ln.startswith('__version__'):
             return ln.split("'")[1]
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #sys.path.insert(0, os.path.abspath('.'))
-sys.path.insert(0,
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# sys.path.insert(0, os.path.dirname(docdir))
 
 
 # -- General configuration -----------------------------------------------------
@@ -36,7 +35,7 @@ sys.path.insert(0,
 #needs_sphinx = '1.0'
 
 # Add any Sphinx extension module names here, as strings. They can be extensions
-extensions = ['sphinx.ext.autodoc', 'sphinx.ext.intersphinx']
+# extensions = ['sphinx.ext.autodoc', 'sphinx.ext.intersphinx']
 
 
 # Add any paths that contain templates here, relative to this directory.
@@ -52,8 +51,8 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'py2app'
-copyright = u'2010, Ronald Oussoren, Bob Ippolito'
+project = u'py2plugin'
+copyright = u'2011, Virgil Dupras, Ronald Oussoren, Bob Ippolito'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -132,7 +131,7 @@ html_theme = 'default'
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+# html_static_path = ['_static']
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
@@ -176,7 +175,7 @@ html_static_path = ['_static']
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'py2appdoc'
+htmlhelp_basename = 'py2plugindoc'
 
 
 # -- Options for LaTeX output --------------------------------------------------
@@ -190,8 +189,8 @@ htmlhelp_basename = 'py2appdoc'
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-  ('index', 'py2app.tex', u'py2app Documentation',
-   u'Ronald Oussoren, Bob Ippolito', 'manual'),
+  ('index', 'py2plugin.tex', u'py2plugin Documentation',
+   u'Virgil Dupras, Ronald Oussoren, Bob Ippolito', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -223,8 +222,8 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', 'py2app', u'py2app Documentation',
-     [u'Ronald Oussoren, Bob Ippolito'], 1)
+    ('index', 'py2plugin', u'py2plugin Documentation',
+     [u'Virgil Dupras, Ronald Oussoren, Bob Ippolito'], 1)
 ]
 
 # Example configuration for intersphinx: refer to the Python standard library.

@@ -1,28 +1,19 @@
 Implementation Details
 ======================
 
-For those interested in the implementation of py2app, here's a quick
-rundown of what happens.
+For those interested in the implementation of py2plugin, here's a quick
+rundown of what happens. The main function of the building process is
+``py2plugin.build_app.build_plugin()``.
 
 
 Argument Parsing
 ----------------
 
-When ``setup.py`` is run, the normal `setuptools`_ / `distutils`_
-``sys.argv`` parsing takes place.
+Arguments are parsed and put into the ``Options``, which sanitizes them and holds them for future
+reference.
 
-
-Run build command
------------------
-
-The ``build`` command is run to ensure that any extensions specified in the
-``setup.py`` will be built prior to the ``py2app`` command. The build
-directory will be added to ``sys.path`` so that ``modulegraph`` will find
-the extensions built during this command.
-
-
-Depdency resolution via modulegraph
------------------------------------
+Dependency resolution via modulegraph
+-------------------------------------
 
 The main script is compiled to Python bytecode and analyzed by modulegraph
 for ``import`` bytecode. It uses this to build a dependency graph of all
@@ -42,39 +33,19 @@ necessary to build the application properly.
 Apply filters
 -------------
 
-All filters specified in recipes or otherwise added to the py2app Command
-object will be run to filter out the dependency graph.
+All filters specified in recipes will be run to filter out the dependency graph.
 
-The built-in filter ``not_system_filter`` will
-always be run for every application built. This ensures that the contents
-of your Mac OS X installation (``/usr/``, ``/System/``, excluding
-``/usr/local/``) will be excluded.
+Create the .plugin bundle
+-------------------------
 
-If the ``--semi-standalone`` option is used (forced if a vendor Python is
-being used), then the ``not_stdlib_filter`` will be automatically added to
-ensure that the Python standard library is not included.
-
-
-Produce graphs
---------------
-
-If the ``--xref`` or ``--graph`` option is used, then the ``modulegraph`` is
-output to HTML or `GraphViz`_ respectively. The ``.html`` or ``.dot`` file
-will be in the ``dist`` folder, and will share the application's name.
-
-
-Create the .app bundle
-----------------------
-
-An application bundle will be created with the name of your application.
+A plugin bundle will be created with the name of your script.
 
 The ``Contents/Info.plist`` will be created from the ``dict`` or filename
-given in the ``plist`` option. py2app will fill in any missing keys as
+given in the ``plist`` option. py2plugin will fill in any missing keys as
 necessary.
 
-A ``__boot__.py`` script will be created in the ``Contents/Resources/`` folder
-of the application bundle. This script runs any prescripts used by the
-application and then your main script.
+A ``__boot__.py`` script will be created in the ``Contents/Resources/`` folder of the plugin bundle.
+This script runs any prescripts used by the application and then your main script.
 
 If the ``--alias`` option is being used, the build procedure is finished.
 
@@ -83,15 +54,8 @@ The main script of your application will be copied *as-is* to the
 obfuscate anything (by having it as a ``.pyc`` in the zip), then you
 *must not* place it in the main script!
 
-Packages that were explicitly included with the ``packages`` option, or by
-a recipe, will be placed in ``Contents/Resources/lib/python2.X/``.
-
-A zip file containing all Python dependencies is created at
-``Contents/Resources/Python/site-packages.zip``.
-
-Extensions (which can't be included in the zip) are copied to the
-``Contents/Resources/lib/python2.X/lib-dynload/`` folder.
-
+All dependencies, as well as packages that were explicitly included with the ``packages`` option, or
+by a recipe, will be placed in ``Contents/Resources/lib/python3.X/``.
 
 Include Mach-O dependencies
 ---------------------------
@@ -107,10 +71,7 @@ them inside the application bundle.
 
 ``Python.framework`` is special-cased here so as to only include the bare
 minimum, otherwise the documentation, entire standard library, etc. would've
-been included. If the ``--semi-standalone`` option or a vendor Python is used,
-then the ``Python.framework`` is ignored. All other vendor files (those in
-``/usr/`` or ``/System/`` excluding ``/usr/local/``) are also excluded.
-
+been included.
 
 Strip the result
 ----------------
@@ -123,14 +84,8 @@ debugging symbols to make your application smaller.
 Copy Python configuration
 -------------------------
 
-This only occurs when not using a vendor Python or using the
-``--semi-standalone`` option.
-
 The Python configuration, which is used by ``distutils`` and ``pkg_resources``
-is copied to ``Contents/Resources/lib/python2.X/config/``. This is needed
+is copied to ``Contents/Resources/lib/python3.X/config/``. This is needed
 to acquire settings relevant to the way Python was built.
 
-.. _`setuptools`: http://pypi.python.org/pypi/setuptools/
-.. _`distutils`: http://docs.python.org/lib/module-distutils.html
-.. _`GraphViz`: http://www.research.att.com/sw/tools/graphviz/
 .. _`macholib`: http://pypi.python.org/pypi/macholib/
