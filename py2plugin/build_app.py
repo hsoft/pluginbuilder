@@ -268,15 +268,13 @@ def create_pluginbundle(destdir, name, plist):
 
 class Options:
     def __init__(self, main_script_path, includes=None, packages=None, excludes=None, dylib_excludes=None,
-            iconfile=None, resources=None, frameworks=None, plist=None, optimize=0, strip=True,
-            alias=False, argv_inject=None, use_pythonpath=False, site_package=False, verbose=False,
-            dry_run=False, bdist_base='build', dist_dir='dist', debug_modulegraph=False, 
-            debug_skip_macholib=False):
+            resources=None, frameworks=None, plist=None, optimize=0, strip=True, alias=False,
+            argv_inject=None, use_pythonpath=False, site_package=False, verbose=False, dry_run=False,
+            bdist_base='build', dist_dir='dist', debug_modulegraph=False, debug_skip_macholib=False):
         self.target = Target(main_script_path)
         self.bdist_base = bdist_base
         self.optimize = optimize
         self.strip = strip
-        self.iconfile = iconfile
         self.alias = alias
         self.argv_inject = argv_inject
         self.site_packages = site_package
@@ -323,12 +321,6 @@ class Options:
         self.dist_dir = dist_dir
         self.debug_skip_macholib = debug_skip_macholib
         self.debug_modulegraph = debug_modulegraph
-        if self.iconfile is None and 'CFBundleIconFile' not in self.plist:
-            # Default is the generic applet icon in the framework
-            iconfile = os.path.join(sys.prefix, 'Resources', 'Python.app',
-                'Contents', 'Resources', 'PythonApplet.icns')
-            if os.path.exists(iconfile):
-                self.iconfile = iconfile
     
 
 class Folders:
@@ -395,15 +387,6 @@ class PluginBuilder:
         plist.update(self.opts.target.plist)
         plist.update(self.opts.plist)
         plist.update(self.get_plist_options())
-
-        if self.opts.iconfile:
-            iconfile = self.opts.iconfile
-            if not os.path.exists(iconfile):
-                iconfile = iconfile + '.icns'
-            if not os.path.exists(iconfile):
-                raise Exception("icon file must exist: %r" % (self.opts.iconfile,))
-            self.opts.resources.append(iconfile)
-            plist['CFBundleIconFile'] = os.path.basename(iconfile)
         self.opts.plist = plist
         return plist
     
