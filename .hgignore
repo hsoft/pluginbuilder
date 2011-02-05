@@ -9,3 +9,5 @@ py2plugin.egg-info
 __pycache__
 
 *.dSYM
+*.mode1v3
+*.pbxuser

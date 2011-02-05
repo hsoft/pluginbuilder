@@ -5,21 +5,6 @@ import argparse
 
 from py2plugin.build_plugin import build_plugin
 
-# argparse's Namespace doesn't seem to support getting arguments as a dictionary. It has the
-# "_get_kwargs()" method, but it's a private method and it's not a good idea to rely on it. The
-# reason for this namespace is just to not have to repeat the list of arguments when comes the time
-# to call build_plugin.
-class DictNamespace:
-    def __init__(self):
-        self.kwargs = {}
-    
-    def __setattr__(self, key, value):
-        if key != 'kwargs':
-            self.kwargs[key] = value
-        else:
-            object.__setattr__(self, key, value)
-    
-
 def parse_args():
     parser = argparse.ArgumentParser(description='Create standalone Mac OS X plugins.')
     parser.add_argument('main_script_path')
@@ -61,11 +46,11 @@ def parse_args():
         help="Drop to pdb console after the module finding phase is complete")
     parser.add_argument('--debug-skip-macholib', action='store_true', default=None,
         help="Skip macholib phase (app will not be standalone!)")
-    return parser.parse_args(namespace=DictNamespace())
+    return parser.parse_args()
 
 def main():
     args = parse_args()
-    given_args = {key: value for key, value in args.kwargs.items() if value is not None}
+    given_args = {key: value for key, value in vars(args).items() if value is not None}
     build_plugin(**given_args)
     return 0
 

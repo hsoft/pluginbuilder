@@ -56,6 +56,7 @@ Contents:
    install
    usage
    embed
+   examples
    recipes
    implementation
 
