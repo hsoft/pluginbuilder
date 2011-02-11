@@ -450,7 +450,7 @@ class PluginBuilder:
         newprescripts = []
         for s in prescripts:
             if isinstance(s, str):
-                newprescripts.append(get_bootstrap('py2plugin.bootstrap.' + s))
+                newprescripts.append(get_bootstrap('pluginbuilder.bootstrap.' + s))
             else:
                 newprescripts.append(s)
 

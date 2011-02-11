@@ -1,7 +1,7 @@
 How to embed your plugin in your application
 ============================================
 
-Once you've built your plugin, you need to load it in your Objective-C app. A while ago, I `explained how to do it <http://www.hardcoded.net/articles/embedded-pyobjc.htm>`__ with ``py2app``, but it's still relevant to py2plugin.
+Once you've built your plugin, you need to load it in your Objective-C app. A while ago, I `explained how to do it <http://www.hardcoded.net/articles/embedded-pyobjc.htm>`__ with ``py2app``, but it's still relevant to pluginbuilder.
 
 Let's say that we want to build a PyObjC application embedding Python that simply displays a list of strings in a ``NSTableView``. Let's first write our Python class::
 
@@ -37,7 +37,7 @@ This is, of course, stupidly-engineered for the purpose of the example. The next
 
 The signature decorators are required so that PyObjC correctly converts ``int``s. Methods that have nothing but ``NSObject`` subclasses as arguments or return values don't need any signature. 
 
-Now that we have this, we're ready to :doc:`build a plugin with py2plugin <usage>`. Use the interface python script as the "main plugin script". Once you have the plugin, you can now create your Objective-C project. The first thing you should do is to create a header file describing the interface of your Python classes:
+Now that we have this, we're ready to :doc:`build a plugin with pluginbuilder <usage>`. Use the interface python script as the "main plugin script". Once you have the plugin, you can now create your Objective-C project. The first thing you should do is to create a header file describing the interface of your Python classes:
 
 .. code-block:: objective-c
     

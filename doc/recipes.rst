@@ -1,7 +1,7 @@
 Recipes
 =======
 
-py2plugin includes a mechanism for working around package incompatibilities,
+pluginbuilder includes a mechanism for working around package incompatibilities,
 and stripping unwanted dependencies automatically. These are called recipes.
 
 Common causes for incompatibility
@@ -64,7 +64,7 @@ Built-in recipes
 Developing Recipes
 ------------------
 
-py2plugin currently searches for recipes only in the ``py2plugin.recipes`` module.
+pluginbuilder currently searches for recipes only in the ``pluginbuilder.recipes`` module.
 A recipe is an object that implements a ``check(modulegraph)`` method.
 
 ``modulegraph``:

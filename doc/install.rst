@@ -1,8 +1,8 @@
 Dependencies
 ============
 
-Before you can install py2plugin, you'll need to install both XCode and Python 3.2. There are other
-dependencies, but they're automatically installed by `distribute`_:
+Before you can install pluginbuilder, you'll need to install both XCode and Python 3.2. There are 
+other dependencies, but they're automatically installed by `distribute`_:
 
 macholib:
     `macholib`_ reads and writes the Mach-O object file format. 
@@ -29,8 +29,8 @@ altgraph:
 Installation
 ============
 
-To install py2plugin from source, simply use the normal procedure for
-installing any Python package. Since py2plugin uses `distribute`_,
+To install pluginbuilder from source, simply use the normal procedure for
+installing any Python package. Since pluginbuilder uses `distribute`_,
 all dependencies (including `distribute`_ itself) will be automatically
 acquired and installed for you as appropriate::
 

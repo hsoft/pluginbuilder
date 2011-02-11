@@ -10,7 +10,7 @@ import os
 import os.path
 from distutils.command.build_py import build_py as _build_py
 from setuptools import setup, find_packages
-from py2plugin import __version__
+from pluginbuilder import __version__
 
 LONG_DESCRIPTION = open('README').read()
 
@@ -21,6 +21,7 @@ CLASSIFIERS = [
         'License :: OSI Approved :: MIT License',
         'Operating System :: MacOS :: MacOS X',
         'Programming Language :: Python',
+        'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.2',
         'Programming Language :: Objective C',
         'Topic :: Software Development :: Libraries :: Python Modules',
@@ -30,21 +31,21 @@ CLASSIFIERS = [
 
 class build_py(_build_py):
     def run(self):
-        if not os.path.exists('py2plugin/bundletemplate/prebuilt/main'):
+        if not os.path.exists('pluginbuilder/bundletemplate/prebuilt/main'):
             print("Pre-building plugin executable file")
-            import py2plugin.bundletemplate.setup
-            py2plugin.bundletemplate.setup.main()
+            import pluginbuilder.bundletemplate.setup
+            pluginbuilder.bundletemplate.setup.main()
         _build_py.run(self)
     
 
 setup(
-    name='py2plugin',
+    name='pluginbuilder',
     version=__version__,
     description='Create standalone Mac OS X plugins with Python',
     author='Virgil Dupras',
     author_email='hsoft@hardcoded.net',
-    url='http://bitbucket.org/hsoft/py2plugin',
-    download_url='http://pypi.python.org/pypi/py2plugin',
+    url='http://bitbucket.org/hsoft/pluginbuilder',
+    download_url='http://pypi.python.org/pypi/pluginbuilder',
     license='MIT or PSF License',
     platforms=['MacOS X'],
     long_description=LONG_DESCRIPTION,
@@ -56,13 +57,13 @@ setup(
     ],
     packages=find_packages(),
     package_data={
-        'py2plugin.bundletemplate': [
+        'pluginbuilder.bundletemplate': [
             'prebuilt/main',
             'lib/site.py',
             'src/main.m',
         ],
     },
-    scripts=['bin/py2plugin'],
+    scripts=['bin/pluginbuilder'],
     zip_safe=False,
     cmdclass={'build_py': build_py},
 )

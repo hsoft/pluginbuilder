@@ -1,7 +1,7 @@
 """
 Append module search paths for third-party packages to sys.path.
 
-This is stripped down and customized for use in py2plugin applications
+This is stripped down and customized for use in pluginbuilder applications
 """
 
 import sys
@@ -13,7 +13,7 @@ if not _parent.endswith(_libdir):
     _parent += _libdir
 sys.path.append(_parent + '/site-packages.zip')
 
-# Stuffit decompresses recursively by default, that can mess up py2plugin bundles,
+# Stuffit decompresses recursively by default, that can mess up pluginbuilder bundles,
 # add the uncompressed site-packages to the path to compensate for that.
 sys.path.append(_parent + '/site-packages')
 

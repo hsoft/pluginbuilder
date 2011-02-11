@@ -1,9 +1,9 @@
 Implementation Details
 ======================
 
-For those interested in the implementation of py2plugin, here's a quick
+For those interested in the implementation of pluginbuilder, here's a quick
 rundown of what happens. The main function of the building process is
-``py2plugin.build_plugin.build_plugin()``.
+``pluginbuilder.build_plugin()``.
 
 
 Argument Parsing
@@ -41,7 +41,7 @@ Create the .plugin bundle
 A plugin bundle will be created with the name of your script.
 
 The ``Contents/Info.plist`` will be created from the ``dict`` or filename
-given in the ``plist`` option. py2plugin will fill in any missing keys as
+given in the ``plist`` option. pluginbuilder will fill in any missing keys as
 necessary.
 
 A ``__boot__.py`` script will be created in the ``Contents/Resources/`` folder of the plugin bundle.

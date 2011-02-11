@@ -1,6 +1,6 @@
 import sys
 import os
-from py2plugin import build_plugin
+from pluginbuilder import build_plugin
 
 def main():
     build_plugin('pyplugin.py')

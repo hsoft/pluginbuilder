@@ -1,12 +1,12 @@
-py2plugin - Create standalone Mac OS X plugins with Python
-============================================================
+pluginbuilder - Create standalone Mac OS X plugins with Python
+==============================================================
 
-py2plugin is a Python package which will allow you to make standalone plugins from Python scripts.
-This plugin can then be used by an Objective-C application (through ``NSBundle``). py2plugin is a
-fork of `py2app`_, but without the distutils based command or the ability to create application
-bundles.
+pluginbuilder is a Python package which will allow you to make standalone plugins from Python 
+scripts. This plugin can then be used by an Objective-C application (through ``NSBundle``). 
+pluginbuilder is a fork of `py2app`_, but without the distutils based command or the ability to 
+create application bundles.
 
 For installation information, refer to the documentation in the "doc" folder (you need Sphinx to
-build it). The documentation is also available online at http://www.hardcoded.net/docs/py2plugin .
+build it). The documentation is also available online at http://www.hardcoded.net/docs/pluginbuilder .
 
 .. _`py2app`: http://bitbucket.org/ronaldoussoren/py2app

@@ -3,7 +3,7 @@
 import sys
 import argparse
 
-from py2plugin.build_plugin import build_plugin
+from pluginbuilder import build_plugin
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Create standalone Mac OS X plugins.')
@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument('--argv-inject', nargs=1,
         help="Inject some commands into the argv")
     parser.add_argument('--bdist-base', nargs=1,
-        help="The folder which will be used by py2plugin to build the plugin (in short, a temp dir)")
+        help="The folder which will be used by pluginbuilder to build the plugin (in short, a temp dir)")
     parser.add_argument('--dist-dir', nargs=1,
         help="The folder in which the finished plugin will be put")
     parser.add_argument('--optimize', nargs=1, type=int,

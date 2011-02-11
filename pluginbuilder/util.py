@@ -192,7 +192,7 @@ def __load():
             continue
         ext = os.path.join(path, ext)
         if os.path.exists(ext):
-            #print "py2plugin extension module", __name__, "->", ext
+            #print "pluginbuilder extension module", __name__, "->", ext
             mod = imp.load_dynamic(__name__, ext)
             #mod.frozen = 1
             break
@@ -225,7 +225,7 @@ def byte_compile(py_files, optimize=0, force=0,
         if not dry_run:
             script = open(script_name, "w")
             script.write("""
-from py2plugin.util import byte_compile
+from pluginbuilder.util import byte_compile
 from modulegraph.modulegraph import *
 files = [
 """)

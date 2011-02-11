@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# py2plugin documentation build configuration file, created by
+# pluginbuilder documentation build configuration file, created by
 # sphinx-quickstart on Sat Jul 31 09:59:24 2010.
 #
 # This file is execfile()d with the current directory set to its containing dir.
@@ -16,7 +16,7 @@ import sys, os
 docdir = os.path.dirname(os.path.abspath(__file__))
 
 def get_version():
-    init_py = os.path.join(docdir, '..', 'py2plugin', '__init__.py')
+    init_py = os.path.join(docdir, '..', 'pluginbuilder', '__init__.py')
     for ln in open(init_py, 'rt'):
         ln = ln.strip()
         if ln.startswith('__version__'):
@@ -51,7 +51,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'py2plugin'
+project = u'pluginbuilder'
 copyright = u'2011, Virgil Dupras, Ronald Oussoren, Bob Ippolito'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -175,7 +175,7 @@ html_theme = 'default'
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'py2plugindoc'
+htmlhelp_basename = 'pluginbuilderdoc'
 
 
 # -- Options for LaTeX output --------------------------------------------------
@@ -189,7 +189,7 @@ htmlhelp_basename = 'py2plugindoc'
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-  ('index', 'py2plugin.tex', u'py2plugin Documentation',
+  ('index', 'pluginbuilder.tex', u'pluginbuilder Documentation',
    u'Virgil Dupras, Ronald Oussoren, Bob Ippolito', 'manual'),
 ]
 
@@ -222,14 +222,14 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', 'py2plugin', u'py2plugin Documentation',
+    ('index', 'pluginbuilder', u'pluginbuilder Documentation',
      [u'Virgil Dupras, Ronald Oussoren, Bob Ippolito'], 1)
 ]
 
 # Example configuration for intersphinx: refer to the Python standard library.
-intersphinx_mapping = {
-    'python': ('http://docs.python.org/', None),
-    'altgraph': ('http://packages.python.org/altgraph', None),
-    'macholib': ('http://packages.python.org/macholib', None),
-    'modulegraph': ('http://packages.python.org/modulegraph', None),
-}
+# intersphinx_mapping = {
+#     'python': ('http://docs.python.org/', None),
+#     'altgraph': ('http://packages.python.org/altgraph', None),
+#     'macholib': ('http://packages.python.org/macholib', None),
+#     'modulegraph': ('http://packages.python.org/modulegraph', None),
+# }

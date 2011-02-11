@@ -37,6 +37,6 @@ def check(mf):
         mf.removeReference(sip, 'ImageTk')
 
     return dict(
-        prescripts = ['py2plugin.recipes.PIL.prescript', s],
+        prescripts = ['pluginbuilder.recipes.PIL.prescript', s],
         flatpackages = [os.path.dirname(m.filename)],
     )

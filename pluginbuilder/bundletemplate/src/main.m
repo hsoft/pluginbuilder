@@ -53,7 +53,7 @@ static int pyobjc_main(int argc, char * const *argv, char * const *envp);
 // Mach-O Constructor
 //
 
-static void __attribute__ ((constructor)) _py2plugin_bundle_load(void);
+static void __attribute__ ((constructor)) _pluginbuilder_bundle_load(void);
 
 //
 // Implementation
@@ -108,7 +108,7 @@ int report_linkEdit_error(const char* name) {
     const char *errorString;
     NSLinkEditError(&errorClass, &errorNumber, &fileName, &errorString);
     NSLog(@"%s: %s", name, errorString);
-    printf("<<<py2plugin>>>> %s: %s\n", name, errorString);
+    printf("<<<pluginbuilder>>>> %s: %s\n", name, errorString);
     return report_error([NSString stringWithFormat:ERR_LINKERRFMT, fileName]);
 }
 
@@ -498,7 +498,7 @@ cleanup:
 
 
 static
-void _py2plugin_bundle_load(void)
+void _pluginbuilder_bundle_load(void)
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     int argc = 1;

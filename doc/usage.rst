@@ -1,17 +1,18 @@
 Usage
 =====
 
-There are two ways to invoke ``py2plugin``: By command line or directly through Python. In both
+There are two ways to invoke ``pluginbuilder``: By command line or directly through Python. In both
 cases, the same arguments are used. Here's an example command line invocation::
 
-    $ py2plugin myscript.py --excludes="somepkg,someotherpkg" --alias --verbose
+    $ pluginbuilder myscript.py --excludes="somepkg,someotherpkg" --alias --verbose
 
 And an example of invocation through Python::
 
-    >>> from py2plugin import build_plugin
+    >>> from pluginbuilder import build_plugin
     >>> build_plugin('myscript.py', excludes=['somepkg', 'someotherpkg'], alias=True, verbose=True)
 
-When you invoke ``py2plugin``, it does its thing and then puts the resulting ``myscript.plugin`` in the "dist" folder (You can change the destination folder with the ``dist_dir`` argument)
+When you invoke ``pluginbuilder``, it does its thing and then puts the resulting ``myscript.plugin`` 
+in the "dist" folder (You can change the destination folder with the ``dist_dir`` argument)
 
 Argument Formatting
 -------------------
@@ -58,7 +59,7 @@ argv_inject (string):
     Inject some commands into the argv.
 
 bdist_base (string default='build'):
-    The folder which will be used by ``py2plugin`` to build the plugin (in short, a temp dir).
+    The folder which will be used by ``pluginbuilder`` to build the plugin (in short, a temp dir).
 
 dist_dir (string default='dist'):
     The folder in which the finished plugin will be put.

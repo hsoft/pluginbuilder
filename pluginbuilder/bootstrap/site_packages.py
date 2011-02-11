@@ -14,7 +14,7 @@ def _site_packages():
                 sys.version[:3], 'site-packages'))
 
     # Work around for a misfeature in setuptools: easy_install.pth places
-    # site-packages way to early on sys.path and that breaks py2plugin bundles.
+    # site-packages way to early on sys.path and that breaks pluginbuilder bundles.
     # NOTE: this is hacks into an undocumented feature of setuptools and
     # might stop to work without warning.
     sys.__egginsert = len(sys.path)

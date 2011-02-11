@@ -2,7 +2,7 @@ Examples
 ========
 
 The ``examples`` subfolder contains a few examples to show the the way to enlightenment. Each
-project have their own extra dependencies, but they of course all require ``py2plugin`` to be
+project have their own extra dependencies, but they of course all require ``pluginbuilder`` to be
 installed. Each of the example have a ``build.py`` file in them, so all you have to do to build them
 is (after you've installed required dependencies) to do::
 
@@ -10,8 +10,8 @@ is (after you've installed required dependencies) to do::
 
 You'll normally end up with a usage .app file in the ``build/release`` subfolder.
 
-Ok, actually there's only one example, and I can't think of another use for py2plugin than to wrap
-a PyObjC-enabled app, but let's pretend there's more than one example...
+Ok, actually there's only one example, and I can't think of another use for pluginbuilder than to 
+wrap a PyObjC-enabled app, but let's pretend there's more than one example...
 
 simple_pyobjc
 -------------

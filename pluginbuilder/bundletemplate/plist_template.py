@@ -43,5 +43,5 @@ def infoPlistDict(CFBundleExecutable, plist={}):
         PythonShortVersion=str(sys.version[:3]),
         PythonExecutable=str(sys.executable),
     ))
-    pythonInfo.setdefault('py2plugin', {}).update(dict(version=__version__))
+    pythonInfo.setdefault('pluginbuilder', {}).update(dict(version=__version__))
     return pdict
