@@ -2,7 +2,7 @@ Why plugins instead of apps?
 ============================
 
 Why embedding a Python plugin into an Objective-C application rather than the other way around
-(driving the Objective-C runtime tom Python)? I wrote an `article about that <http://www.hardcoded.net/articles/embedded-pyobjc.htm>`__ a while ago. Here's an excerpt:
+(driving the Objective-C runtime from Python)? I wrote an `article about that <http://www.hardcoded.net/articles/embedded-pyobjc.htm>`__ a while ago. Here's an excerpt:
 
 **Speed.** In a GUI application, there's usually many, *many* calls being made all the time by the different elements of the GUI. For example, ``NSTableView``'s datasource and delegate methods are called tons of times at each redraw. Each calls having to pass through the PyObjC bridge is inherently slower than a native call. While machines are usually fast enough for this not to be noticeable most of the time, there might be situations where it's not the case, scrolling a large list for example.
 

@@ -8,7 +8,7 @@ is (after you've installed required dependencies) to do::
 
     $ python build.py
 
-You'll normally end up with a usage .app file in the ``build/release`` subfolder.
+You'll normally end up with a .app file in the ``build/release`` subfolder.
 
 Ok, actually there's only one example, and I can't think of another use for pluginbuilder than to 
 wrap a PyObjC-enabled app, but let's pretend there's more than one example...
