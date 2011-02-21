@@ -60,6 +60,7 @@ Contents:
    examples
    recipes
    implementation
+   changelog
 
 .. _`py2app`: http://bitbucket.org/ronaldoussoren/py2app
 .. _`PSF`: http://www.python.org/psf/license.html

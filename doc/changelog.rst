@@ -22,7 +22,7 @@ Features:
      )
 
 - py2app can now package namespace packages that were installed
-  using `pip <http://pypi.python.org/pypi/pip>` or the
+  using `pip <http://pypi.python.org/pypi/pip>`_ or the
   setuptools install option ``--single-version-externally-managed``.
 
 - the bundle template now supports python3, based on a patch
@@ -170,8 +170,6 @@ Features:
 	 # The conversion is allowed to change the proposed
 	 # destination to another name in the same directory.
          pass
-
-.. `virtualenv`_: http://pypi.python.org/pypi/virtualenv
 
 Buf fixes:
 
