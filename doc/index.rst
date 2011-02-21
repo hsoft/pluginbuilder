@@ -22,21 +22,19 @@ already exists, hence this name.
 Online Resources
 ----------------
 
-There are several online resources to help you get along with pluginbuilder.
-
-Mailing list:
-    http://www.python.org/community/sigs/current/pythonmac-sig/
-
-Issue tracker:
-    http://bitbucket.org/hsoft/pluginbuilder/issues
-
 Source code repository:
     http://bitbucket.org/hsoft/pluginbuilder
 
 PyPI Entry:
     http://pypi.python.org/pypi/pluginbuilder/
 
-If you're looking for help, pay special attention to the ``examples`` folder in the source, which demonstrates some common use cases.
+Issue tracker:
+    http://bitbucket.org/hsoft/pluginbuilder/issues
+
+Online Documentation (this doc):
+    http://www.hardcoded.net/docs/pluginbuilder
+
+If you're looking for help, pay special attention to the ``examples`` folder in the source, which demonstrates some (one in fact...) common use cases.
 
 License
 -------

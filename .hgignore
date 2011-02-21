@@ -1,6 +1,7 @@
 syntax: glob
 
 doc/_build
+doc_html
 build
 dist
 pluginbuilder/bundletemplate/prebuilt

@@ -4,7 +4,7 @@ Usage
 There are two ways to invoke ``pluginbuilder``: By command line or directly through Python. In both
 cases, the same arguments are used. Here's an example command line invocation::
 
-    $ pluginbuilder myscript.py --excludes="somepkg,someotherpkg" --alias --verbose
+    $ pluginbuilder myscript.py --excludes somepkg someotherpkg --alias --verbose
 
 And an example of invocation through Python::
 

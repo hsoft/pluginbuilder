@@ -35,7 +35,7 @@ This is, of course, stupidly-engineered for the purpose of the example. The next
         def stringAtIndex_(self, index):
             return self.py.string_at_index(index)
 
-The signature decorators are required so that PyObjC correctly converts ``int``s. Methods that have nothing but ``NSObject`` subclasses as arguments or return values don't need any signature. 
+The signature decorators are required so that PyObjC correctly converts ``int``\ s. Methods that have nothing but ``NSObject`` subclasses as arguments or return values don't need any signature. 
 
 Now that we have this, we're ready to :doc:`build a plugin with pluginbuilder <usage>`. Use the interface python script as the "main plugin script". Once you have the plugin, you can now create your Objective-C project. The first thing you should do is to create a header file describing the interface of your Python classes:
 
