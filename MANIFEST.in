@@ -1,0 +1,2 @@
+include pluginbuilder/bundletemplate/src/main.m
+include pluginbuilder/bundletemplate/lib/site.py

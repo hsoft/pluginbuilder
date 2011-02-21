@@ -30,12 +30,21 @@ CLASSIFIERS = [
 ]
 
 class build_py(_build_py):
-    def run(self):
+    def get_data_files(self):
+        # BEGIN RANT: distutils sucks
+        # What we want to do here is to compile main.m before we install the package and send the
+        # result in the package destination as a data file. The normal way to do this would be to
+        # override build_py.run(), but unfortunately, get_data_files() is called in
+        # finalize_options() (which happens before run()). The end result is that even though
+        # 'prebuilt/main' is in package_data, it won't be copied in the final destination because
+        # it doesn't exist when get_data_files() is called. Therefore, we have to override
+        # get_data_files() instead, which feels like a hack, which is what distutils is anyway.
+        # END RANT: distutils sucks
         if not os.path.exists('pluginbuilder/bundletemplate/prebuilt/main'):
             print("Pre-building plugin executable file")
             import pluginbuilder.bundletemplate.setup
             pluginbuilder.bundletemplate.setup.main()
-        _build_py.run(self)
+        return _build_py.get_data_files(self)
     
 
 setup(
