@@ -1,4 +1,4 @@
-__version__ = '0.1.0'
+__version__ = '1.0.0'
 
 # If we import build_plugin as top level imports, then it's impossible to get __version__ without
 # importing pluginbuilder's dependencies first. So, import build_plugin only when it's called.

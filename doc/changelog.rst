@@ -1,6 +1,11 @@
 Release history
 ===============
 
+pluginbuilder 1.0.0 (21-02-2011)
+--------------------------------
+
+Forked py2app and renamed it pluginbuilder.
+
 py2app 0.5.3
 ------------
 
