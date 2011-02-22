@@ -168,24 +168,6 @@ NSString *getPythonLocation(NSArray *pyLocations) {
 }
 
 static
-NSArray *getPythonPathArray(NSDictionary *infoDictionary, NSString *resourcePath) {
-    NSMutableArray *pythonPathArray = [NSMutableArray arrayWithObject: resourcePath];
-    NSArray *pyResourcePackages = [infoDictionary objectForKey:@"PyResourcePackages"];
-    if (pyResourcePackages != nil) {
-        NSString *pkg;
-        NSEnumerator *pyResourcePackageEnumerator = [pyResourcePackages objectEnumerator];
-        while ((pkg = [pyResourcePackageEnumerator nextObject])) {
-            pkg = [pkg stringByExpandingTildeInPath];
-            if (![@"/" isEqualToString: [pkg substringToIndex:1]]) {
-                pkg = [resourcePath stringByAppendingPathComponent:pkg];
-            }
-            [pythonPathArray addObject:pkg];
-        }
-    }
-    return pythonPathArray;
-}
-
-static
 NSString *getMainPyPath(NSDictionary *infoDictionary) {
     NSArray *possibleMains = [infoDictionary objectForKey:@"PyMainFileNames"];
     if ( !possibleMains )
@@ -267,7 +249,7 @@ int pyobjc_main(int argc, char * const *argv, char * const *envp) {
 
     // Find our resource path and possible PYTHONPATH
     NSString *resourcePath = [bundleBundle() resourcePath];
-    NSArray *pythonPathArray = getPythonPathArray(infoDictionary, resourcePath);
+    NSArray *libraryPath = [resourcePath stringByAppendingPathComponent:[infoDictionary objectForKey:@"PyLibraryPath"]];
 
     // find the main script
     NSString *mainPyPath = getMainPyPath(infoDictionary);
@@ -306,33 +288,28 @@ int pyobjc_main(int argc, char * const *argv, char * const *envp) {
 
     curenv = getenv("LC_CTYPE");
     if (curenv) {
-            curenv = strdup(curenv);
+        curenv = strdup(curenv);
     }
 
 
-    
     // Set up the environment variables to be transferred
     NSMutableDictionary *newEnviron = [NSMutableDictionary dictionary];
     [newEnviron setObject:[NSString stringWithFormat:@"%p", bundleBundle()] forKey:@"PYOBJC_BUNDLE_ADDRESS"];
     [newEnviron setObject:resourcePath forKey:@"RESOURCEPATH"];
+    [newEnviron setObject:libraryPath forKey:@"LIBRARYPATH"];
     NSMutableDictionary *oldEnviron = [NSMutableDictionary dictionary];
     
     // bootstrap Python with information about how to find what it needs
     // if it is not already initialized
     if (!was_initialized) {
-        // $PREFIX/Python -> $PREFIX
-        NSString *pythonProgramName = [pyLocation stringByDeletingLastPathComponent];
         if (!getPyOption(infoDictionary, @"alias")) {
-            setenv("PYTHONHOME", [resourcePath fileSystemRepresentation], 1);
+            wchar_t wPythonHome[PATH_MAX+1];
+            mbstowcs(wPythonHome, [resourcePath fileSystemRepresentation], PATH_MAX+1);
+            Py_SetPythonHome(wPythonHome);
         }
         
-        NSString *pyExecutableName = [infoDictionary objectForKey:@"PyExecutableName"];
-        if ( !pyExecutableName ) {
-            pyExecutableName = @"python";
-        }
-    
-        pythonProgramName = [[pythonProgramName stringByAppendingPathComponent:@"bin"] stringByAppendingPathComponent:pyExecutableName];
-        
+        NSString *pythonProgramName = [pyLocation stringByDeletingLastPathComponent];
+        pythonProgramName = [[pythonProgramName stringByAppendingPathComponent:@"bin"] stringByAppendingPathComponent:@"python"];
         wchar_t wPythonName[PATH_MAX+1];
         mbstowcs(wPythonName, [pythonProgramName fileSystemRepresentation], PATH_MAX+1);
         Py_SetProgramName(wPythonName);
@@ -355,7 +332,7 @@ int pyobjc_main(int argc, char * const *argv, char * const *envp) {
     FILE *mainPyFile = NULL;
     Py_Initialize();
     PyEval_InitThreads();
-
+    
     /*
      * Reset the environment and locale information
      */
@@ -363,7 +340,7 @@ int pyobjc_main(int argc, char * const *argv, char * const *envp) {
     free(curlocale);
 
     if (curenv) {
-	setenv("LC_CTYPE", curenv, 1);
+        setenv("LC_CTYPE", curenv, 1);
         free(curenv);
     } else {
         unsetenv("LC_CTYPE");
@@ -373,17 +350,6 @@ int pyobjc_main(int argc, char * const *argv, char * const *envp) {
     PyGILState_STATE gilState = PyGILState_Ensure();
 
     if (was_initialized) {
-        // transfer path into existing Python process
-        PyObject *path = PySys_GetObject("path");
-        NSEnumerator *pathEnumerator = [pythonPathArray reverseObjectEnumerator];
-        NSString *curPath;
-        while ((curPath = [pathEnumerator nextObject])) {
-            PyObject *b = PyBytes_FromString([curPath UTF8String]);
-            PyObject *s = PyObject_CallMethod(b, "decode", "s", "utf-8");
-            PyList_Insert(path, 0, s);
-            Py_DecRef(b);Py_DecRef(s);
-        }
-
         // transfer environment variables into existing Python process
         PyObject *osModule = PyImport_ImportModule("os");
         PyObject *pyenv = PyObject_GetAttrString(osModule, "environ");

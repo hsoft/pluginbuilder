@@ -23,11 +23,7 @@ def infoPlistDict(CFBundleExecutable, plist={}):
         NSMainNibFile='MainMenu',
         NSPrincipalClass=NSPrincipalClass,
         PyMainFileNames=['__boot__'],
-        PyResourcePackages=[ (s % version) for s in [
-            'lib/python%s',
-            'lib/python%s/lib-dynload',
-            'lib/python%s/site-packages.zip',
-        ]] + [ 'lib/python%s.zip' % version.replace('.', '') ],
+        PyLibraryPath = 'lib/python{}'.format(version),
         PyRuntimeLocations=[(s % version) for s in [
             '@executable_path/../Frameworks/Python.framework/Versions/%s/Python',
             '~/Library/Frameworks/Python.framework/Versions/%s/Python',

@@ -185,21 +185,15 @@ def fancy_split(s, sep=","):
 
 LOADER = """
 def __load():
-    import imp, os, sys
+    import imp, os, sys, os.path
     ext = %r
-    for path in sys.path:
-        if not path.endswith('lib-dynload'):
-            continue
-        ext = os.path.join(path, ext)
-        if os.path.exists(ext):
-            #print "pluginbuilder extension module", __name__, "->", ext
-            mod = imp.load_dynamic(__name__, ext)
-            #mod.frozen = 1
-            break
-        else:
-            raise ImportError(repr(ext) + " not found")
+    library_path = os.environ['LIBRARYPATH']
+    dynload_path = os.path.join(library_path, 'lib-dynload')
+    ext = os.path.join(dynload_path, ext)
+    if os.path.exists(ext):
+        mod = imp.load_dynamic(__name__, ext)
     else:
-        raise ImportError("lib-dynload not found")
+        raise ImportError(repr(ext) + " not found")
 __load()
 del __load
 """
