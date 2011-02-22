@@ -354,7 +354,6 @@ class PluginBuilder:
     def __init__(self, folders, opts):
         self.folders = folders
         self.opts = opts
-        self.runtime_preferences = list(self.get_runtime_preferences())
     
     #--- Plist
     def get_default_plist(self):
@@ -420,12 +419,6 @@ class PluginBuilder:
             dylib = 'libpython%s.dylib' % (sys.version[:3],)
             runtime = os.path.join(prefix, 'lib', dylib)
         return dylib, runtime
-    
-    def get_runtime_preferences(self, prefix=None, version=None):
-        dylib, runtime = self.get_runtime(prefix=prefix, version=version)
-        yield os.path.join('@executable_path', '..', 'Frameworks', dylib)
-        if self.opts.alias:
-            yield runtime
     
     #--- Misc pre-build
     def initialize_prescripts(self):
@@ -552,8 +545,12 @@ class PluginBuilder:
         appdir = os.path.join(self.folders.dist_dir, os.path.dirname(base))
         appname = plist['CFBundleName']
         print("*** creating plugin bundle: %s ***" % (appname,))
-        if self.runtime_preferences:
-            plist.setdefault('PyRuntimeLocations', self.runtime_preferences)
+        dylib, runtime = self.get_runtime()
+        if self.opts.alias:
+            runtime_location = runtime
+        else:
+            runtime_location = os.path.join('@executable_path', '..', 'Frameworks', dylib)
+        plist.setdefault('PyRuntimeLocation', runtime_location)
         appdir, plist = create_pluginbundle(appdir, appname, plist=plist)
         resdir = os.path.join(appdir, 'Contents', 'Resources')
         return appdir, resdir, plist

@@ -22,15 +22,9 @@ def infoPlistDict(CFBundleExecutable, plist={}):
         NSHumanReadableCopyright='Copyright not specified',
         NSMainNibFile='MainMenu',
         NSPrincipalClass=NSPrincipalClass,
-        PyMainFileNames=['__boot__'],
+        PyMainFileName='__boot__.py',
         PyLibraryPath = 'lib/python{}'.format(version),
-        PyRuntimeLocations=[(s % version) for s in [
-            '@executable_path/../Frameworks/Python.framework/Versions/%s/Python',
-            '~/Library/Frameworks/Python.framework/Versions/%s/Python',
-            '/Library/Frameworks/Python.framework/Versions/%s/Python',
-            '/Network/Library/Frameworks/Python.framework/Versions/%s/Python',
-            '/System/Library/Frameworks/Python.framework/Versions/%s/Python',
-        ]],
+        PyRuntimeLocation='@executable_path/../Frameworks/Python.framework/Versions/{}/Python'.format(version),
     )
     pdict.update(plist)
     pythonInfo = pdict.setdefault('PythonInfoDict', {})
