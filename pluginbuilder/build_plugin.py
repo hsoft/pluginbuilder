@@ -18,12 +18,11 @@ from modulegraph.util import imp_find_module
 
 import macholib.dyld
 import macholib.MachOStandalone
-from macholib.util import has_filename_filter
+from macholib.util import has_filename_filter, strip_files
 
 from . import bundletemplate, recipes
-from .util import (byte_compile, make_loader, copy_tree, strip_files, in_system_path,
-    makedirs, iter_platform_files, skipscm, copy_file_data, os_path_isdir, copy_resource, SCMDIRS,
-    mergecopy, mergetree, make_exec)
+from .util import (byte_compile, make_loader, copy_tree, makedirs, iter_platform_files, skipscm,
+    copy_file_data, copy_resource, SCMDIRS, mergecopy, mergetree, make_exec, is_python_package)
 
 from distutils.sysconfig import get_config_var
 PYTHONFRAMEWORK=get_config_var('PYTHONFRAMEWORK')
@@ -54,19 +53,6 @@ def normalize_data_file(fn):
         fn = convert_path(fn)
         return ('', [fn])
     return fn
-
-def is_system(executable=None):
-    if executable is None:
-        executable = sys.executable
-    return in_system_path(executable)
-
-def installation_info(executable=None, version=None):
-    if version is None:
-        version = sys.version
-    if is_system(executable):
-        return version[:3] + " (FORCED: Using vendor Python)"
-    else:
-        return version[:3]
 
 def force_symlink(src, dst):
     try:
@@ -179,16 +165,10 @@ def copy_package_data(package, target_dir):
             pth = os.path.join(dname, fname)
 
             # Check if we have found a package, exclude those
-            if os_path_isdir(pth):
-                for p in os_listdir(pth):
-                    if p.startswith('__init__.') and p[8:] in exts:
-                        break
-
-                else:
-                    copy_tree(pth, os.path.join(target_dir, fname))
+            if is_python_package(pth):
                 continue
-            else:
-                copy_file(pth, os.path.join(target_dir, fname))
+            
+            copy_file(pth, os.path.join(target_dir, fname))
 
 def strip_dsym(platfiles, appdir):
     """ Remove .dSYM directories in the bundled application """
@@ -212,7 +192,7 @@ def strip_files_and_report(files, verbose):
         unstripped += os.stat(fn).st_size
         stripfiles.append(fn)
         log.info('stripping %s', os.path.basename(fn))
-    strip_files(stripfiles, verbose=verbose)
+    strip_files(stripfiles)
     stripped = 0
     for fn in stripfiles:
         stripped += os.stat(fn).st_size

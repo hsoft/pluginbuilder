@@ -146,11 +146,14 @@ def newer(source, target):
 
     return msource > mtarget
 
-def in_system_path(filename):
+def is_python_package(path):
+    """Returns whether `path` is a python package (has a __init__.py(c|o) file).
     """
-    Return True if the file is in a system path
-    """
-    return macholib.util.in_system_path(filename)
+    if os_path_isdir(path):
+        for p in os_listdir(path):
+            if p.startswith('__init__.') and p[8:] in {'.py', '.pyc', '.pyo'}:
+                return True
+    return False
 
 def make_exec(path):
     mask = os.umask(0)
@@ -170,18 +173,6 @@ def mergetree(src, dst, condition=None, copyfn=mergecopy):
 
 def move(src, dst):
     return macholib.util.move(src, dst)
-
-def copy2(src, dst):
-    return macholib.util.copy2(src, dst)
-
-def fancy_split(s, sep=","):
-    # a split which also strips whitespace from the items
-    # passing a list or tuple will return it unchanged
-    if s is None:
-        return []
-    if hasattr(s, "split"):
-        return [item.strip() for item in s.split(sep)]
-    return s
 
 LOADER = """
 def __load():
@@ -313,14 +304,6 @@ def iter_platform_files(path, is_platform_file=macholib.util.is_platform_file):
             fn = os.path.join(root, fn)
             if is_platform_file(fn):
                 yield fn
-
-def strip_files(files, dry_run=0, verbose=0):
-    """
-    Strip the given set of files
-    """
-    if dry_run:
-        return
-    return macholib.util.strip_files(files)
 
 def copy_tree(src, dst,
         preserve_mode=1,
