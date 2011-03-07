@@ -1,6 +1,12 @@
 Release history
 ===============
 
+pluginbuilder 1.0.1 (07-03-2011)
+--------------------------------
+
+* Fixed a bug where the build plugin wouldn't run from a path with non-ascii characters.
+* Continued slimming down the code.
+
 pluginbuilder 1.0.0 (21-02-2011)
 --------------------------------
 
