@@ -1,6 +1,7 @@
 import imp
 import sys
 import os
+import os.path as op
 import plistlib
 import shutil
 from io import StringIO
@@ -71,17 +72,24 @@ def copy_python_framework(info, dst):
     # Since python 3.2, the naming scheme for config files location has considerably
     # complexified. The old, simple way doesn't work anymore. Fortunately, a new module was
     # added to get such paths easily.
+    
+    # It's possible that virtualenv is messing with us here, so we only use the rightmost part of
+    # each of the two paths below. For pyconfig_path, it's the last 3 elements of the path
+    # (include/python3.2m/pyconfig.h) and for makefile_path it's the last 4
+    # (lib/python3.2/config-3.2m/Makefile). Yes, this kind of location can change depending on the
+    # platform, but we're only supporting Mac OS X eh? We'll take these last path parts and append
+    # them to indir and we'll have our non-virtualenv paths.
     pyconfig_path = sysconfig.get_config_h_filename()
     makefile_path = sysconfig.get_makefile_filename()
-    assert pyconfig_path.startswith(indir)
-    assert makefile_path.startswith(indir)
-    pyconfig_path = pyconfig_path[len(indir)+1:]
-    makefile_path = makefile_path[len(indir)+1:]
+    pyconfig_path = op.join(*pyconfig_path.split(os.sep)[-3:])
+    makefile_path = op.join(*makefile_path.split(os.sep)[-4:])
+    assert pyconfig_path.startswith('include')
+    assert makefile_path.startswith('lib')
 
     # distutils looks for some files relative to sys.executable, which
     # means they have to be in the framework...
-    mkpath(os.path.join(outdir, os.path.dirname(pyconfig_path)))
-    mkpath(os.path.join(outdir, os.path.dirname(makefile_path)))
+    mkpath(op.join(outdir, op.dirname(pyconfig_path)))
+    mkpath(op.join(outdir, op.dirname(makefile_path)))
     fmwkfiles = [
         os.path.basename(info['name']),
         'Resources/Info.plist',
@@ -728,11 +736,10 @@ class PluginBuilder:
             if os.path.exists(fn):
                 prefix = open(fn, 'rU').read().strip()
 
-            rest_path = sys.executable[len(sys.prefix)+1:]
+            rest_path = os.path.normpath(sys.executable)[len(os.path.normpath(sys.prefix))+1:]
             if rest_path.startswith('.'):
                 rest_path = rest_path[1:]
 
-            print("XXXX", os.path.join(prefix, rest_path))
             copy_file(os.path.join(prefix, rest_path), execdst)
 
         else:
