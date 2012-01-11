@@ -82,3 +82,19 @@ debug_modulegraph (bool default=False):
 
 debug_skip_macholib (bool default=False):
     skip macholib phase (app will not be standalone!).
+
+Additional functions
+--------------------
+
+There are additional functions exposed in pluginbuilder to help you do plugin-less embedding.
+If, for example, you're using the Python API directly in your Objective-C code and would rather
+embed Python directly in your main app instead of a plugin, you can use helper functions in
+pluginbuilder to help you do that. First, there's ``get_python_header_folder()``, which simply
+returns the path to your current python's header folder. You can use this in your build script to
+create a symbolic link to it in your project's build folder which you can then add to your XCode
+project's search path. Then there's ``copy_embeddable_python_dylib(dst)`` which copies the dylib
+of your python framework's installation to ``dst`` and automatically changes its install path
+to ``@rpath/Python`` so that you can embed it and link to it in your XCode project. Finally, there's
+``collect_dependencies(main_script_path, dst, **options)`` which does the same dependency collection
+process as it does when it builds a plugin, but without the rest of the hocus pocus. It puts it
+directly in ``dst``. The options that it takes are the same as in ``build_plugin()``.

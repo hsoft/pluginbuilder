@@ -20,6 +20,7 @@ from modulegraph.util import imp_find_module
 import macholib.dyld
 import macholib.MachOStandalone
 from macholib.util import has_filename_filter, strip_files
+from macholib.framework import framework_info
 
 from . import bundletemplate, recipes
 from .util import (byte_compile, make_loader, copy_tree, makedirs, iter_platform_files, skipscm,
@@ -175,8 +176,11 @@ def copy_package_data(package, target_dir):
             # Check if we have found a package, exclude those
             if is_python_package(pth):
                 continue
-            
-            copy_file(pth, os.path.join(target_dir, fname))
+            copydest = op.join(target_dir, fname)
+            if op.isdir(pth):
+                copy_tree(pth, copydest)
+            else:
+                copy_file(pth, copydest)
 
 def strip_dsym(platfiles, appdir):
     """ Remove .dSYM directories in the bundled application """
@@ -378,7 +382,8 @@ class PluginBuilder:
         return plist
     
     #--- Runtime
-    def get_runtime(self, prefix=None, version=None):
+    @staticmethod
+    def get_runtime(prefix=None, version=None):
         # XXX - this is a bit of a hack!
         #       ideally we'd use dylib functions to figure this out
         if prefix is None:
@@ -526,6 +531,25 @@ class PluginBuilder:
         print('%d orphaned' % (nodes_orphaned,))
         print('%d remaining' % (nodes_seen - nodes_removed,))
     
+    def collect_all(self):
+        debug = 4 if self.opts.debug_modulegraph else 0
+        mf = find_modules(scripts=self.collect_scripts(), includes=self.opts.includes,
+            packages=self.opts.packages, excludes=self.opts.excludes, debug=debug)
+        filters = [has_filename_filter]
+        flatpackages = {}
+        loader_files = []
+        self.process_recipes(mf, filters, flatpackages, loader_files)
+
+        if self.opts.debug_modulegraph:
+            import pdb
+            pdb.Pdb().set_trace()
+
+        self.filter_dependencies(mf, filters)
+
+        py_files, extensions = self.finalize_modulefinder(mf)
+        pkgdirs = self.collect_packagedirs()
+        return py_files, pkgdirs, extensions, loader_files
+    
     #--- Build
     def create_bundle(self, target, script):
         plist = self.opts.plist
@@ -543,7 +567,16 @@ class PluginBuilder:
         resdir = os.path.join(appdir, 'Contents', 'Resources')
         return appdir, resdir, plist
     
-    def build_executable(self, target, pkgexts, copyexts, script):
+    def copyexts(self, copyexts, dst):
+        for copyext in copyexts:
+            fn = os.path.join(dst,
+                (copyext.identifier.replace('.', os.sep) +
+                os.path.splitext(copyext.filename)[1])
+            )
+            mkpath(os.path.dirname(fn))
+            copy_file_data(copyext.filename, fn, dry_run=self.opts.dry_run)
+    
+    def build_executable(self, target, copyexts, script):
         # Build an executable for the target
         appdir, resdir, plist = self.create_bundle(target, script)
         self.appdir = appdir
@@ -593,13 +626,7 @@ class PluginBuilder:
             dst = os.path.join(pydir, os.path.basename(pkg))
             mkpath(dst)
             copy_tree(pkg, dst)
-        for copyext in copyexts:
-            fn = os.path.join(ext_dir,
-                (copyext.identifier.replace('.', os.sep) +
-                os.path.splitext(copyext.filename)[1])
-            )
-            mkpath(os.path.dirname(fn))
-            copy_file_data(copyext.filename, fn, dry_run=self.opts.dry_run)
+        self.copyexts(copyexts, ext_dir)
 
         target.appdir = appdir
         return appdir
@@ -677,11 +704,9 @@ class PluginBuilder:
                 return
         return SourceModule(item.identifier, pathname)
     
-    def create_binaries(self, py_files, pkgdirs, extensions, loader_files):
-        print("*** create binaries ***")
-        pkgexts = []
+    def copy_and_compile_collected(self, dst, py_files, pkgdirs, extensions, loader_files,
+            create_ext_loader=True):
         copyexts = []
-        extmap = {}
         def packagefilter(mod, pkgdirs=pkgdirs):
             fn = os.path.realpath(getattr(mod, 'filename', None))
             if fn is None:
@@ -694,19 +719,16 @@ class PluginBuilder:
             py_files = list(filter(packagefilter, py_files))
         for ext in extensions:
             fn = packagefilter(ext)
-            if fn is None:
-                fn = os.path.realpath(getattr(ext, 'filename', None))
-                pkgexts.append(ext)
-            else:
-                if '.' in ext.identifier:
+            if fn is not None:
+                if create_ext_loader and '.' in ext.identifier:
                     py_files.append(self.create_loader(ext))
                 copyexts.append(ext)
-            extmap[fn] = ext
+        
 
         # byte compile the python modules into the target directory
         print("*** byte compile python files ***")
         byte_compile(py_files,
-                     target_dir=self.folders.collect_dir,
+                     target_dir=dst,
                      optimize=self.opts.optimize,
                      force=True,
                      verbose=self.opts.verbose,
@@ -714,10 +736,10 @@ class PluginBuilder:
 
         for item in py_files:
             if not isinstance(item, Package): continue
-            copy_package_data(item, self.folders.collect_dir)
+            copy_package_data(item, dst)
 
         for path, files in loader_files:
-            dest = os.path.join(self.folders.collect_dir, path)
+            dest = os.path.join(dst, path)
             mkpath(dest)
             for fn in files:
                 destfn = os.path.join(dest, os.path.basename(fn))
@@ -725,10 +747,15 @@ class PluginBuilder:
                     copy_tree(fn, destfn, preserve_symlinks=False)
                 else:
                     copy_file(fn, destfn)
-
+        return copyexts
+    
+    def create_binaries(self, py_files, pkgdirs, extensions, loader_files):
+        print("*** create binaries ***")
+        copyexts = self.copy_and_compile_collected(self.folders.collect_dir, py_files,
+            pkgdirs, extensions, loader_files)
         # build the executables
         target = self.opts.target
-        dst = self.build_executable(target, pkgexts, copyexts, target.script)
+        dst = self.build_executable(target, copyexts, target.script)
         exp = os.path.join(dst, 'Contents', 'MacOS')
         execdst = os.path.join(exp, 'python')
         if os.path.exists(os.path.join(sys.prefix, ".Python")):
@@ -765,24 +792,14 @@ class PluginBuilder:
         self.build_alias_executable(self.opts.target, self.opts.target.script)
     
     def run_normal(self):
-        debug = 4 if self.opts.debug_modulegraph else 0
-        mf = find_modules(scripts=self.collect_scripts(), includes=self.opts.includes,
-            packages=self.opts.packages, excludes=self.opts.excludes, debug=debug)
-        filters = [has_filename_filter]
-        flatpackages = {}
-        loader_files = []
-        self.process_recipes(mf, filters, flatpackages, loader_files)
-
-        if self.opts.debug_modulegraph:
-            import pdb
-            pdb.Pdb().set_trace()
-
-        self.filter_dependencies(mf, filters)
-
-        py_files, extensions = self.finalize_modulefinder(mf)
-        pkgdirs = self.collect_packagedirs()
+        py_files, pkgdirs, extensions, loader_files = self.collect_all()
         self.create_binaries(py_files, pkgdirs, extensions, loader_files)
     
+    def run_collect(self, dst):
+        py_files, pkgdirs, extensions, loader_files = self.collect_all()
+        copyexts = self.copy_and_compile_collected(dst, py_files, pkgdirs, extensions, loader_files,
+            create_ext_loader=False)
+        self.copyexts(copyexts, dst)
 
 def build_plugin(main_script_path, **options):
     opts = Options(main_script_path, **options)
@@ -800,3 +817,21 @@ def build_plugin(main_script_path, **options):
             builder.run_normal()
     finally:
         sys.path = sys_old_path
+
+def collect_dependencies(main_script_path, dst, **options):
+    opts = Options(main_script_path, **options)
+    folders = Folders(opts)
+    builder = PluginBuilder(folders, opts)
+    builder.run_collect(dst)
+
+def copy_embeddable_python_dylib(dst):
+    _, runtime = PluginBuilder.get_runtime()
+    filedest = op.join(dst, 'Python')
+    print(runtime)
+    shutil.copy(runtime, filedest)
+    os.chmod(filedest, 0o664) # We need write permission to use install_name_tool
+    cmd = 'install_name_tool -id @rpath/Python %s' % filedest
+    os.system(cmd)
+
+def get_python_header_folder():
+    return op.dirname(sysconfig.get_config_h_filename())
