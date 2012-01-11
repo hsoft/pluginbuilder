@@ -828,7 +828,7 @@ def copy_embeddable_python_dylib(dst):
     _, runtime = PluginBuilder.get_runtime()
     filedest = op.join(dst, 'Python')
     shutil.copy(runtime, filedest)
-    os.chmod(filedest, 0o664) # We need write permission to use install_name_tool
+    os.chmod(filedest, 0o774) # We need write permission to use install_name_tool
     cmd = 'install_name_tool -id @rpath/Python %s' % filedest
     os.system(cmd)
 
