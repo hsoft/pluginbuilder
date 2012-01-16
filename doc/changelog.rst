@@ -1,6 +1,11 @@
 Release history
 ===============
 
+pluginbuilder 1.1.0 (16-01-2012)
+--------------------------------
+
+* Added new functions to allow plugin-less python embedding.
+
 pluginbuilder 1.0.1 (07-03-2011)
 --------------------------------
 
